@@ -1,0 +1,72 @@
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: devops-ai-agent
+  namespace: devops-tools
+
+---
+# ClusterRole: read-only across the cluster + write to allowed namespaces
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: devops-ai-agent-reader
+rules:
+  # Read-only on everything
+  - apiGroups: ["", "apps", "batch", "networking.k8s.io"]
+    resources: ["pods", "deployments", "services", "events", "nodes",
+                "replicasets", "statefulsets", "daemonsets", "ingresses",
+                "persistentvolumeclaims"]
+    verbs: ["get", "list", "watch"]
+  # Pod logs
+  - apiGroups: [""]
+    resources: ["pods/log"]
+    verbs: ["get"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: devops-ai-agent-reader
+subjects:
+  - kind: ServiceAccount
+    name: devops-ai-agent
+    namespace: devops-tools
+roleRef:
+  kind: ClusterRole
+  name: devops-ai-agent-reader
+  apiGroup: rbac.authorization.k8s.io
+
+---
+# Namespace-scoped write access (only allowed namespaces)
+# Repeat this for each namespace in ALLOWED_NAMESPACES
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: devops-ai-agent-writer
+  namespace: staging  # Change to your namespace
+rules:
+  - apiGroups: ["apps"]
+    resources: ["deployments", "statefulsets"]
+    verbs: ["patch", "update"]
+  - apiGroups: ["apps"]
+    resources: ["deployments/scale"]
+    verbs: ["patch", "update"]
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["get", "patch", "update"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: devops-ai-agent-writer
+  namespace: staging
+subjects:
+  - kind: ServiceAccount
+    name: devops-ai-agent
+    namespace: devops-tools
+roleRef:
+  kind: Role
+  name: devops-ai-agent-writer
+  apiGroup: rbac.authorization.k8s.io

@@ -1,0 +1,52 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: devops-ai-agent
+  namespace: devops-tools
+  labels:
+    app: devops-ai-agent
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: devops-ai-agent
+  template:
+    metadata:
+      labels:
+        app: devops-ai-agent
+    spec:
+      serviceAccountName: devops-ai-agent
+      containers:
+        - name: agent
+          image: your-registry/devops-ai-agent:latest
+          ports:
+            - containerPort: 8000
+          envFrom:
+            - secretRef:
+                name: devops-ai-agent-secrets
+            - configMapRef:
+                name: devops-ai-agent-config
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "100m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
