@@ -1,4 +1,4 @@
-# 🤖 DevOps AI Agent
+# DevOps AI Agent
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
@@ -6,7 +6,7 @@
 
 An autonomous **AI-powered DevOps agent** that monitors, diagnoses, and fixes incidents across your entire infrastructure stack — automatically. Built for **SRE teams** who want to reduce toil and improve MTTR (Mean Time To Recovery).
 
-## 🎯 Built For SRE & DevOps Teams
+## Built For SRE & DevOps Teams
 
 This agent is your **24/7 on-call teammate** that handles:
 
@@ -20,14 +20,14 @@ This agent is your **24/7 on-call teammate** that handles:
 ### Why This Agent?
 
 - **Reduce Alert Fatigue**: Let AI handle repetitive incidents
-- **Faster MTTR**: Automated diagnosis → remediation in minutes
+- **Faster MTTR**: Automated diagnosis and remediation in minutes
 - **Learn from Operations**: Full audit trail of every decision
 - **Safe by Default**: Dry-run first, approval gates, command whitelisting
 - **Plugin Architecture**: Easy to extend with custom collectors and tools
 
 ---
 
-## 🏗️ Architecture
+## Architecture
 
 ```
 ┌─────────────────┐
@@ -69,27 +69,27 @@ This agent is your **24/7 on-call teammate** that handles:
 
 ---
 
-## ⚠️ Safety-First Approach
+## WARNING: Safety-First Approach
 
 ```
-🛡️ NEVER DELETE. NEVER DESTROY. NOTIFY INSTEAD.
+NEVER DELETE. NEVER DESTROY. NOTIFY INSTEAD.
 ```
 
 This agent follows **strict safety principles**:
-- ✅ **Email alerts for dangerous operations** - Never executes delete/destroy commands
-- ✅ **Approval gates** - Human oversight required for critical actions
-- ✅ **Dry-run by default** - Test before executing
-- ✅ **Comprehensive audit trail** - Every decision logged
-- ✅ **Security scanning** - Automatic vulnerability detection
-- ✅ **Compliance checks** - Validate against DevSecOps standards
+- **Email alerts for dangerous operations** - Never executes delete/destroy commands
+- **Approval gates** - Human oversight required for critical actions
+- **Dry-run by default** - Test before executing
+- **Comprehensive audit trail** - Every decision logged
+- **Security scanning** - Automatic vulnerability detection
+- **Compliance checks** - Validate against DevSecOps standards
 
 **Read [SECURITY_POLICY.md](SECURITY_POLICY.md) before deployment.**
 
 ---
 
-## ✨ Key Features
+## Key Features
 
-### 🔌 Plugin-Based Architecture
+### Plugin-Based Architecture
 
 Easily extend with custom collectors and tools:
 
@@ -109,7 +109,7 @@ def my_platform_action(params):
 self.collectors['my_platform'] = MyPlatformCollector()
 ```
 
-### 🛡️ Production-Ready Safety & DevSecOps
+### Production-Ready Safety & DevSecOps
 
 **Core Safety**:
 - **Dangerous operations BLOCKED**: No deletion, no termination, no data loss
@@ -128,7 +128,7 @@ self.collectors['my_platform'] = MyPlatformCollector()
 
 **See [SECURITY_POLICY.md](SECURITY_POLICY.md) and [DEVSECOPS_GUIDE.md](DEVSECOPS_GUIDE.md) for details.**
 
-### 🚀 Multi-Platform Support
+### Multi-Platform Support
 
 | Category | Supported Platforms |
 |----------|-------------------|
@@ -138,7 +138,7 @@ self.collectors['my_platform'] = MyPlatformCollector()
 | **Monitoring** | Prometheus Alertmanager, CloudWatch, Azure Monitor |
 | **Notifications** | Slack, PagerDuty |
 
-### 🧠 Intelligent Automation
+### Intelligent Automation
 
 - **Context-aware**: Collects relevant logs, metrics, and configs
 - **Root cause analysis**: Understands error patterns across platforms
@@ -147,7 +147,7 @@ self.collectors['my_platform'] = MyPlatformCollector()
 
 ---
 
-## 🚀 Quick Start
+## Quick Start
 
 ### Prerequisites
 
@@ -214,7 +214,7 @@ ENABLE_SECURITY_SCANNING=true
 ENABLE_COMPLIANCE_CHECKS=true
 ```
 
-**⚠️ IMPORTANT**: Configure email alerts BEFORE deployment. The agent sends email notifications for dangerous operations that require manual intervention.
+**WARNING: IMPORTANT**: Configure email alerts BEFORE deployment. The agent sends email notifications for dangerous operations that require manual intervention.
 
 See [.env.example](.env.example) for all configuration options.
 
@@ -261,7 +261,7 @@ kubectl logs -f deployment/devops-agent -n devops-agent
 
 ---
 
-## 📋 Usage Examples
+## Usage Examples
 
 ### Kubernetes CrashLoopBackOff
 
@@ -301,7 +301,7 @@ kubectl logs -f deployment/devops-agent -n devops-agent
 
 ---
 
-## 🔧 Configuration
+## Configuration
 
 ### Platform Setup Guides
 
@@ -345,7 +345,7 @@ Use the Generic Webhooks integration pointing to `/webhook/pagerduty`
 
 ---
 
-## 🧪 Testing
+## Testing
 
 ```bash
 # Run unit tests
@@ -364,7 +364,7 @@ See [CI pipeline](.github/workflows/ci.yml) for automated testing.
 
 ---
 
-## 📊 Monitoring & Observability
+## Monitoring & Observability
 
 ### Health Check
 
@@ -392,7 +392,7 @@ agent_approval_requests_total{approved="true"} 12
 
 ---
 
-## 🔌 Extending the Agent
+## Extending the Agent
 
 ### Add a Custom Collector
 
@@ -490,7 +490,7 @@ class DevOpsAgent:
 
 ---
 
-## 🤝 Contributing
+## Contributing
 
 We welcome contributions! See [CONTRIBUTING.md](CONTRIBUTING.md) for:
 
@@ -516,10 +516,10 @@ pytest --cov=. tests/
 
 ---
 
-## 📖 Documentation
+## Documentation
 
 ### Essential Reading
-- **[SECURITY_POLICY.md](SECURITY_POLICY.md)** - ⚠️ **READ FIRST** - Safety rules and blocked operations
+- **[SECURITY_POLICY.md](SECURITY_POLICY.md)** - **READ FIRST** - Safety rules and blocked operations
 - **[DEVSECOPS_GUIDE.md](DEVSECOPS_GUIDE.md)** - DevSecOps best practices and compliance
 - **[GETTING_STARTED.md](GETTING_STARTED.md)** - Quick start guide (15 minutes)
 
@@ -532,7 +532,7 @@ pytest --cov=. tests/
 
 ---
 
-## 🛡️ Security
+## Security
 
 ### Best Practices
 
@@ -550,13 +550,13 @@ Do not open public issues for security concerns.
 
 ---
 
-## 📝 License
+## License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
 ---
 
-## 🙏 Acknowledgments
+## Acknowledgments
 
 - Built with [Anthropic Claude](https://www.anthropic.com/claude) for AI reasoning
 - Inspired by the SRE community and incident response best practices
@@ -564,7 +564,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ---
 
-## 📬 Support & Community
+## Support & Community
 
 - **Issues**: [GitHub Issues](https://github.com/yourusername/devops-ai-agent/issues)
 - **Discussions**: [GitHub Discussions](https://github.com/yourusername/devops-ai-agent/discussions)
@@ -572,7 +572,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ---
 
-## 🗺️ Roadmap
+## Roadmap
 
 - [ ] More CI/CD platforms (CircleCI, TeamCity, Drone CI)
 - [ ] Database diagnostics (PostgreSQL, MySQL, MongoDB)
@@ -584,6 +584,6 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ---
 
-**Made with ❤️ by the DevOps community**
+**Made by the DevOps community**
 
 *Reduce toil. Ship faster. Sleep better.*
