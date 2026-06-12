@@ -92,6 +92,10 @@ class TestAgentLoop:
     @pytest.mark.asyncio
     async def test_agent_handles_k8s_incident(self):
         from agent.core import DevOpsAgent
+        import os
+
+        # Set dummy API key for test
+        os.environ['ANTHROPIC_API_KEY'] = 'sk-ant-test-dummy-key-for-testing'
 
         with patch("anthropic.Anthropic") as mock_anthropic:
             mock_client = MagicMock()

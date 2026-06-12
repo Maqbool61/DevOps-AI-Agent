@@ -19,14 +19,16 @@ def classify_issue(alertname: str, labels: dict) -> str:
     """
     name = alertname.lower()
 
+    # CI/CD specific keywords (check first to avoid conflicts with k8s "deployment")
+    cicd_keywords = ["pipeline", "build", "ci", "release", "workflow", "job",
+                     "jenkins", "gitlab", "bamboo", "azure-pipeline", "github-actions",
+                     "buildfailed", "pipelinefailed", "pipelineerror", "deploymentfailed"]
+    
     k8s_keywords = ["pod", "container", "crash", "oom", "image", "evict",
-                    "pending", "replicaset", "deployment", "statefulset", "daemonset"]
+                    "pending", "replicaset", "statefulset", "daemonset"]
     
     server_keywords = ["cpu", "memory", "disk", "load", "nginx", "apache",
                        "service", "host", "node", "network", "ssh", "systemd"]
-    
-    cicd_keywords = ["deploy", "pipeline", "build", "ci", "release", "workflow",
-                     "jenkins", "gitlab", "bamboo", "azure-pipeline", "github-actions"]
     
     argocd_keywords = ["argocd", "argo", "gitops", "sync"]
     
@@ -40,6 +42,10 @@ def classify_issue(alertname: str, labels: dict) -> str:
     if any(k in name for k in argocd_keywords):
         return "argocd"
     
+    # Check CI/CD before K8s (to catch "deployment" in CICD context)
+    if any(k in name for k in cicd_keywords):
+        return "cicd"
+    
     # Check cloud providers
     if any(k in name for k in aws_keywords):
         return "cloud_aws"
@@ -51,10 +57,6 @@ def classify_issue(alertname: str, labels: dict) -> str:
     # Check K8s
     if any(k in name for k in k8s_keywords):
         return "k8s"
-    
-    # Check CI/CD
-    if any(k in name for k in cicd_keywords):
-        return "cicd"
     
     # Check server
     if any(k in name for k in server_keywords):
