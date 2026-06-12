@@ -1,0 +1,10 @@
+include README.md
+include LICENSE
+include usage-readme.md
+include SECURITY_GUARANTEES.md
+include requirements.txt
+include .env.example
+recursive-include k8s *.yaml
+recursive-exclude tests *
+recursive-exclude docs *
+recursive-exclude .github *

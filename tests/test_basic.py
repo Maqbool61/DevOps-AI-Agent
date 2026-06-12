@@ -161,6 +161,34 @@ class TestClassifier:
         assert result in ["cicd", "unknown"]
 
 
+class TestDatabasePolicy:
+    """Database collection is optional for security."""
+
+    def test_database_disabled_by_default(self, monkeypatch):
+        monkeypatch.delenv("ENABLE_DATABASE_COLLECTION", raising=False)
+        from collectors.database_policy import (
+            is_database_collection_enabled,
+            is_database_resource_type,
+            check_database_access,
+        )
+
+        assert is_database_collection_enabled() is False
+        assert is_database_resource_type("rds") is True
+        assert is_database_resource_type("ec2") is False
+        blocked = check_database_access("rds", cloud="aws")
+        assert blocked is not None
+        assert blocked.get("blocked") is True
+
+    def test_database_enabled_when_configured(self, monkeypatch):
+        monkeypatch.setenv("ENABLE_DATABASE_COLLECTION", "true")
+        from importlib import reload
+        import collectors.database_policy as dp
+        reload(dp)
+
+        assert dp.is_database_collection_enabled() is True
+        assert dp.check_database_access("cloud_sql", cloud="gcp") is None
+
+
 class TestPrompts:
     """Test suite for system prompts"""
     

@@ -29,6 +29,7 @@ from tools.cicd_tools import CICDTools
 from tools.argocd_tools import ArgoCDTools
 from tools.cloud_tools import CloudTools
 from tools.notify import SlackNotifier
+from collectors.database_policy import check_database_access
 
 log = structlog.get_logger()
 
@@ -235,7 +236,12 @@ AGENT_TOOLS = [
     # ─── Cloud Provider Tools ─────────────────────────────────────────────────
     {
         "name": "get_cloud_resource",
-        "description": "Get diagnostic info for cloud resources. Supports: AWS (ec2, ecs, lambda, rds), GCP (gce, cloud_run, cloud_function), Azure (vm, app_service, function).",
+        "description": (
+            "Get diagnostic info for cloud resources. Supports AWS, GCP, Azure compute, "
+            "containers, K8s (EKS/GKE/AKS), load balancers, and more. "
+            "Database resources (RDS, Cloud SQL, Azure SQL, Redis, DynamoDB) are OPTIONAL "
+            "and disabled by default (ENABLE_DATABASE_COLLECTION=false) for security."
+        ),
         "input_schema": {
             "type": "object",
             "properties": {
@@ -447,17 +453,32 @@ class DevOpsAgent:
             elif issue_type == "argocd" and context.get("app_name"):
                 enriched["argocd_data"] = await self.argocd_collector.collect(context["app_name"])
             elif issue_type == "cloud_aws" and context.get("resource_type") and context.get("resource_id"):
-                enriched["cloud_data"] = await self.aws_collector.collect(
-                    context["resource_type"], context["resource_id"], **context.get("params", {})
-                )
+                rt = context["resource_type"]
+                blocked = check_database_access(rt, cloud="aws")
+                if blocked:
+                    enriched["cloud_data"] = blocked
+                else:
+                    enriched["cloud_data"] = await self.aws_collector.collect(
+                        rt, context["resource_id"], **context.get("params", {})
+                    )
             elif issue_type == "cloud_gcp" and context.get("resource_type") and context.get("resource_id"):
-                enriched["cloud_data"] = await self.gcp_collector.collect(
-                    context["resource_type"], context["resource_id"], **context.get("params", {})
-                )
+                rt = context["resource_type"]
+                blocked = check_database_access(rt, cloud="gcp")
+                if blocked:
+                    enriched["cloud_data"] = blocked
+                else:
+                    enriched["cloud_data"] = await self.gcp_collector.collect(
+                        rt, context["resource_id"], **context.get("params", {})
+                    )
             elif issue_type == "cloud_azure" and context.get("resource_type") and context.get("resource_id"):
-                enriched["cloud_data"] = await self.azure_collector.collect(
-                    context["resource_type"], context["resource_id"], **context.get("params", {})
-                )
+                rt = context["resource_type"]
+                blocked = check_database_access(rt, cloud="azure")
+                if blocked:
+                    enriched["cloud_data"] = blocked
+                else:
+                    enriched["cloud_data"] = await self.azure_collector.collect(
+                        rt, context["resource_id"], **context.get("params", {})
+                    )
             elif issue_type == "server":
                 enriched["server_data"] = await self.server_collector.collect()
         except Exception as e:
@@ -584,7 +605,11 @@ class DevOpsAgent:
                 resource_type = inputs["resource_type"]
                 resource_id = inputs["resource_id"]
                 params = inputs.get("additional_params", {})
-                
+
+                blocked = check_database_access(resource_type, cloud=cloud)
+                if blocked:
+                    return blocked
+
                 if cloud == "aws":
                     return await self.aws_collector.collect(resource_type, resource_id, **params)
                 elif cloud == "gcp":

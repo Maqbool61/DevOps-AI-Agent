@@ -43,14 +43,27 @@ PyGithub>=2.3.0
 # google-cloud-functions>=1.16.0
 # google-cloud-logging>=3.9.0
 # google-cloud-sql>=1.8.0
+# google-cloud-storage>=2.14.0
+# google-cloud-pubsub>=2.19.0
+# google-cloud-redis>=2.14.0
+# google-cloud-artifact-registry>=1.11.0
 
 # Azure (optional - only if using Azure resources)
 # azure-identity>=1.15.0
 # azure-mgmt-compute>=30.6.0
 # azure-mgmt-containerservice>=29.0.0
+# azure-mgmt-containerinstance>=10.1.0
+# azure-mgmt-appcontainers>=3.0.0
+# azure-mgmt-containerregistry>=10.3.0
 # azure-mgmt-web>=7.2.0
 # azure-mgmt-sql>=4.0.0
 # azure-mgmt-monitor>=6.0.2
+# azure-mgmt-network>=25.0.0
+# azure-mgmt-storage>=21.0.0
+# azure-mgmt-cosmosdb>=9.0.0
+# azure-mgmt-redis>=14.0.0
+# azure-mgmt-servicebus>=8.0.0
+# azure-mgmt-batch>=17.0.0
 
 # --- Monitoring ---
 prometheus-client>=0.20.0

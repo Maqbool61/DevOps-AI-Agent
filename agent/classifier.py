@@ -25,18 +25,31 @@ def classify_issue(alertname: str, labels: dict) -> str:
                      "buildfailed", "pipelinefailed", "pipelineerror", "deploymentfailed"]
     
     k8s_keywords = ["pod", "container", "crash", "oom", "image", "evict",
-                    "pending", "replicaset", "statefulset", "daemonset"]
+                    "pending", "replicaset", "statefulset", "daemonset",
+                    "nodepool", "crashloop"]
     
     server_keywords = ["cpu", "memory", "disk", "load", "nginx", "apache",
                        "service", "host", "node", "network", "ssh", "systemd"]
     
     argocd_keywords = ["argocd", "argo", "gitops", "sync"]
     
-    aws_keywords = ["ec2", "ecs", "lambda", "rds", "aws", "cloudwatch", "elb", "alb"]
-    
-    gcp_keywords = ["gce", "gke", "cloud-run", "cloud-function", "gcp", "google-cloud"]
-    
-    azure_keywords = ["azure-vm", "aks", "app-service", "azure-function", "azure-sql"]
+    aws_keywords = [
+        "ec2", "ecs", "eks", "fargate", "lambda", "rds", "aws", "cloudwatch",
+        "elb", "alb", "ecr", "elasticache", "dynamodb", "sqs", "sns", "s3",
+        "autoscaling", "elasticbeanstalk", "apprunner", "batch",
+    ]
+
+    gcp_keywords = [
+        "gce", "gke", "cloud-run", "cloud-function", "gcp", "google-cloud",
+        "compute-engine", "artifact-registry", "cloud-sql", "memorystore",
+        "pubsub", "cloud-storage", "load-balancer", "cloud-composer",
+    ]
+
+    azure_keywords = [
+        "azure-vm", "aks", "app-service", "azure-function", "azure-sql",
+        "aci", "container-instance", "container-apps", "acr", "vmss",
+        "cosmosdb", "redis", "application-gateway", "service-bus",
+    ]
 
     # Check ArgoCD first (most specific)
     if any(k in name for k in argocd_keywords):
@@ -65,6 +78,14 @@ def classify_issue(alertname: str, labels: dict) -> str:
     # Fallback: check labels
     if labels.get("namespace") or labels.get("pod"):
         return "k8s"
+    if labels.get("cluster") and labels.get("cloud_provider"):
+        cloud = labels["cloud_provider"].lower()
+        if cloud in ("aws", "eks"):
+            return "cloud_aws"
+        if cloud in ("gcp", "gke", "google"):
+            return "cloud_gcp"
+        if cloud in ("azure", "aks"):
+            return "cloud_azure"
     if labels.get("pipeline") or labels.get("job"):
         return "cicd"
     if labels.get("argocd_app"):
