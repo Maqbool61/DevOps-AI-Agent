@@ -198,50 +198,41 @@ jobs:
           python -c "
           import sys
           sys.path.insert(0, '.')
-          from tools.executor import SafeExecutorEnhanced
+          from tools.executor import SafeExecutor
 
-          executor = SafeExecutorEnhanced()
+          executor = SafeExecutor()
 
-          # Test dry-run mode with a safe command
-          result = executor.execute_command('kubectl get pods', description='List pods', dry_run=True)
-          assert result['dry_run'] == True, f'Expected dry_run=True, got: {result}'
-          assert result['status'] == 'success', f'Expected success, got: {result[\"status\"]}'
-          print('✓ Safe executor dry-run test passed')
+          # Test _classify: read-only commands are safe
+          assert executor._classify('kubectl get pods') == 'safe', 'Expected safe'
+          assert executor._classify('kubectl describe pod myapp') == 'safe', 'Expected safe'
+          assert executor._classify('kubectl logs myapp') == 'safe', 'Expected safe'
+          print('✓ Safe executor classify safe commands test passed')
 
-          # Test dangerous command is blocked
-          result = executor.execute_command(
-              'kubectl delete pod myapp',
-              description='Delete pod - DANGEROUS',
-              context={'test': True},
-              dry_run=True
-          )
-          assert result['status'] == 'blocked', f'Expected blocked, got: {result[\"status\"]}'
-          assert result['danger_level'] == 'critical', f'Expected critical, got: {result[\"danger_level\"]}'
-          assert 'incident_id' in result, 'Expected incident_id in blocked result'
-          print('✓ Safe executor dangerous command block test passed')
+          # Test _classify: mutating commands require approval (AUTO_APPLY=false by default)
+          assert executor._classify('kubectl delete pod myapp') == 'requires_approval', 'Expected requires_approval'
+          assert executor._classify('kubectl exec myapp -- bash') == 'requires_approval', 'Expected requires_approval'
+          assert executor._classify('rm -rf /tmp/test') == 'requires_approval', 'Expected requires_approval'
+          print('✓ Safe executor classify dangerous commands test passed')
 
-          # Test command not in allowed list is blocked
-          result = executor.execute_command(
-              'somecustom weird-cmd',
-              description='Unknown command',
-              dry_run=True
-          )
-          assert result['status'] == 'blocked', f'Expected blocked, got: {result[\"status\"]}'
-          print('✓ Safe executor allowlist test passed')
+          # Test _classify: allowed-with-auto-apply commands
+          assert executor._classify('kubectl rollout restart deployment/myapp') == 'allowed', 'Expected allowed'
+          assert executor._classify('kubectl apply -f manifest.yaml') == 'allowed', 'Expected allowed'
+          print('✓ Safe executor classify allowed commands test passed')
 
-          # Test scale-to-zero is blocked
-          result = executor.execute_command(
-              'kubectl scale deployment myapp --replicas=0',
-              description='Scale to zero - DANGEROUS',
-              dry_run=True
-          )
-          assert result['status'] == 'blocked', f'Expected blocked, got: {result[\"status\"]}'
-          print('✓ Safe executor scale-to-zero block test passed')
+          # Test run_safe blocks requires_approval commands when AUTO_APPLY=false
+          import asyncio
+          async def test_run_safe():
+              result = await executor.run_safe('kubectl delete pod myapp')
+              assert result.get('blocked') == True, f'Expected blocked=True, got: {result}'
+              assert result.get('requires_approval') == True, 'Expected requires_approval=True'
+              assert 'approval_payload' in result, 'Expected approval_payload in result'
+              print('✓ Safe executor run_safe blocks dangerous commands test passed')
 
-          # Test blocked commands log is populated
-          log = executor.get_blocked_commands_log()
-          assert len(log) >= 2, f'Expected at least 2 blocked entries, got: {len(log)}'
-          print(f'✓ Blocked commands log contains {len(log)} entries')
+              result = await executor.run_safe('kubectl apply -f manifest.yaml')
+              assert result.get('blocked') == True, f'Expected blocked when AUTO_APPLY=false, got: {result}'
+              print('✓ Safe executor run_safe blocks allowed commands without AUTO_APPLY test passed')
+
+          asyncio.run(test_run_safe())
           "
 
       - name: Test K8s Tools (Mock)
