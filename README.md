@@ -69,6 +69,24 @@ This agent is your **24/7 on-call teammate** that handles:
 
 ---
 
+## ⚠️ Safety-First Approach
+
+```
+🛡️ NEVER DELETE. NEVER DESTROY. NOTIFY INSTEAD.
+```
+
+This agent follows **strict safety principles**:
+- ✅ **Email alerts for dangerous operations** - Never executes delete/destroy commands
+- ✅ **Approval gates** - Human oversight required for critical actions
+- ✅ **Dry-run by default** - Test before executing
+- ✅ **Comprehensive audit trail** - Every decision logged
+- ✅ **Security scanning** - Automatic vulnerability detection
+- ✅ **Compliance checks** - Validate against DevSecOps standards
+
+**Read [SECURITY_POLICY.md](SECURITY_POLICY.md) before deployment.**
+
+---
+
 ## ✨ Key Features
 
 ### 🔌 Plugin-Based Architecture
@@ -91,14 +109,24 @@ def my_platform_action(params):
 self.collectors['my_platform'] = MyPlatformCollector()
 ```
 
-### 🛡️ Production-Ready Safety
+### 🛡️ Production-Ready Safety & DevSecOps
 
+**Core Safety**:
+- **Dangerous operations BLOCKED**: No deletion, no termination, no data loss
+- **Email notifications**: Alerts sent for operations requiring manual intervention
 - **Dry-run by default**: Preview changes before applying
-- **Approval gates**: Human-in-the-loop for critical actions
-- **Command whitelisting**: Only safe operations allowed
+- **Multi-level approval gates**: Human oversight for critical actions
+- **Command blacklist**: Destructive commands permanently blocked
 - **Audit trail**: Every decision logged with AI reasoning
-- **Step limits**: Prevents runaway loops
-- **Read-only operations**: Most tools are diagnostic only
+
+**DevSecOps Features**:
+- **Security scanning**: Detects vulnerabilities, exposed secrets, misconfigurations
+- **Compliance validation**: CIS Benchmark, SOC 2, PCI-DSS, HIPAA
+- **Container security**: Privileged containers, root user, security context checks
+- **RBAC enforcement**: Least-privilege access controls
+- **Emergency stop**: Kill switch for immediate shutdown
+
+**See [SECURITY_POLICY.md](SECURITY_POLICY.md) and [DEVSECOPS_GUIDE.md](DEVSECOPS_GUIDE.md) for details.**
 
 ### 🚀 Multi-Platform Support
 
@@ -163,6 +191,15 @@ nano .env
 # AI Provider
 ANTHROPIC_API_KEY=your-claude-api-key
 
+# Email Alerts (CRITICAL - for dangerous operation notifications)
+EMAIL_ENABLED=true
+EMAIL_SMTP_HOST=smtp.gmail.com
+EMAIL_SMTP_PORT=587
+EMAIL_SMTP_USER=devops-agent@yourcompany.com
+EMAIL_SMTP_PASSWORD=your-app-password
+EMAIL_FROM=devops-agent@yourcompany.com
+EMAIL_TO=sre-team@yourcompany.com
+
 # Notifications
 SLACK_WEBHOOK_URL=https://hooks.slack.com/services/...
 SLACK_APPROVAL_CHANNEL=devops-approvals
@@ -170,9 +207,14 @@ SLACK_APPROVAL_CHANNEL=devops-approvals
 # Source Control
 GITHUB_TOKEN=ghp_...
 
-# Safety Settings
-AUTO_APPLY=false  # Start with manual approval mode
+# Safety Settings (IMPORTANT - read SECURITY_POLICY.md)
+AUTO_APPLY=false  # Keep false - requires approval for all actions
+AGENT_EMERGENCY_STOP=false  # Set true to disable agent
+ENABLE_SECURITY_SCANNING=true
+ENABLE_COMPLIANCE_CHECKS=true
 ```
+
+**⚠️ IMPORTANT**: Configure email alerts BEFORE deployment. The agent sends email notifications for dangerous operations that require manual intervention.
 
 See [.env.example](.env.example) for all configuration options.
 
@@ -476,10 +518,17 @@ pytest --cov=. tests/
 
 ## 📖 Documentation
 
+### Essential Reading
+- **[SECURITY_POLICY.md](SECURITY_POLICY.md)** - ⚠️ **READ FIRST** - Safety rules and blocked operations
+- **[DEVSECOPS_GUIDE.md](DEVSECOPS_GUIDE.md)** - DevSecOps best practices and compliance
+- **[GETTING_STARTED.md](GETTING_STARTED.md)** - Quick start guide (15 minutes)
+
+### Detailed Guides
 - [Multi-Platform Guide](MULTI_PLATFORM_GUIDE.md) - Complete platform configuration
+- [Deployment Guide](DEPLOYMENT.md) - Production deployment for K8s, AWS, GCP, Azure
+- [Architecture](ARCHITECTURE.md) - System design and architecture
+- [Contributing](CONTRIBUTING.md) - How to contribute
 - [Extension Summary](EXTENSION_SUMMARY.md) - Recent changes and features
-- [API Documentation](docs/API.md) - Webhook API reference
-- [Security Guide](docs/SECURITY.md) - Security best practices
 
 ---
 
