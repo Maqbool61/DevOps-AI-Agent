@@ -198,7 +198,7 @@ jobs:
           python -c "
           import sys
           sys.path.insert(0, '.')
-          from tools.executor import SafeExecutorEnhanced
+          from tools.safe_executor_enhanced import SafeExecutorEnhanced
 
           executor = SafeExecutorEnhanced()
 
