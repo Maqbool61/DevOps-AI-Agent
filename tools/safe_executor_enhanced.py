@@ -307,9 +307,24 @@ class SafeExecutorEnhanced:
             # Execute command safely
             logger.info(f"Executing: {command}")
             
+            # Parse command into list for safe execution (no shell injection)
+            # For safety, we use shlex.split to properly parse the command
+            import shlex
+            try:
+                cmd_list = shlex.split(command)
+            except ValueError:
+                # If parsing fails, it's likely a complex shell command - block it
+                return {
+                    "status": "failed",
+                    "message": "Command contains invalid shell syntax",
+                    "command": command,
+                    "error": "Complex shell commands are not allowed for security"
+                }
+            
+            # Execute without shell=True to prevent shell injection
             result = subprocess.run(
-                command,
-                shell=True,
+                cmd_list,
+                shell=False,  # Security: Never use shell=True
                 capture_output=True,
                 text=True,
                 timeout=300,  # 5 minute timeout
