@@ -13,22 +13,22 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.9'
-      
+
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install black flake8 pylint
           pip install -r requirements.txt
-      
+
       - name: Run Black
         run: black --check .
         continue-on-error: true
-      
+
       - name: Run Flake8
         run: flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
         continue-on-error: true
@@ -39,21 +39,21 @@ jobs:
     strategy:
       matrix:
         python-version: ['3.9', '3.10', '3.11']
-    
+
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
-      
+
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           pip install pytest pytest-cov pytest-mock
-      
+
       - name: Create dummy .env file
         run: |
           cat > .env << EOF
@@ -83,13 +83,13 @@ jobs:
           AZURE_CLIENT_ID=dummy
           AZURE_CLIENT_SECRET=dummy
           EOF
-      
+
       - name: Run Unit Tests
         run: |
           pytest tests/ -v --cov=. --cov-report=xml --cov-report=term
         env:
           TESTING: true
-      
+
       - name: Upload Coverage
         uses: codecov/codecov-action@v4
         with:
@@ -99,21 +99,21 @@ jobs:
   test-collectors:
     name: Test Collectors with Dummy Data
     runs-on: ubuntu-latest
-    
+
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.9'
-      
+
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           pip install pytest pytest-mock
-      
+
       - name: Create test environment
         run: |
           cat > .env << EOF
@@ -121,32 +121,31 @@ jobs:
           GITHUB_TOKEN=ghp_dummy_token
           SLACK_WEBHOOK_URL=https://hooks.slack.com/dummy
           EOF
-      
+
       - name: Test K8s Collector (Mock)
         run: |
           python -c "
           import sys
           sys.path.insert(0, '.')
           from collectors.k8s import K8sCollector
-          
-          # Test with dummy data
+
           collector = K8sCollector()
           print('K8s Collector initialized successfully')
           print('✓ K8s collector test passed')
           "
-      
+
       - name: Test GitHub Collector (Mock)
         run: |
           python -c "
           import sys
           sys.path.insert(0, '.')
           from collectors.github import GitHubCollector
-          
+
           collector = GitHubCollector()
           print('GitHub Collector initialized successfully')
           print('✓ GitHub collector test passed')
           "
-      
+
       - name: Test GitLab Collector (Mock)
         run: |
           python -c "
@@ -155,12 +154,12 @@ jobs:
           sys.path.insert(0, '.')
           os.environ['GITLAB_TOKEN'] = 'dummy-token'
           from collectors.gitlab import GitLabCollector
-          
+
           collector = GitLabCollector()
           print('GitLab Collector initialized successfully')
           print('✓ GitLab collector test passed')
           "
-      
+
       - name: Test ArgoCD Collector (Mock)
         run: |
           python -c "
@@ -170,7 +169,7 @@ jobs:
           os.environ['ARGOCD_SERVER'] = 'argocd.test'
           os.environ['ARGOCD_TOKEN'] = 'dummy-token'
           from collectors.argocd import ArgoCDCollector
-          
+
           collector = ArgoCDCollector()
           print('ArgoCD Collector initialized successfully')
           print('✓ ArgoCD collector test passed')
@@ -179,52 +178,83 @@ jobs:
   test-tools:
     name: Test Tools with Dummy Data
     runs-on: ubuntu-latest
-    
+
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.9'
-      
+
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           pip install pytest pytest-mock
-      
+
       - name: Test Safe Executor
         run: |
           python -c "
           import sys
           sys.path.insert(0, '.')
-          from tools.executor import SafeExecutor
-          
-          executor = SafeExecutor(allowed_commands=['echo', 'ls'])
-          
-          # Test dry-run mode
-          result = executor.run_command('echo test', dry_run=True)
-          assert result['dry_run'] == True
+          from tools.executor import SafeExecutorEnhanced
+
+          executor = SafeExecutorEnhanced()
+
+          # Test dry-run mode with a safe command
+          result = executor.execute_command('kubectl get pods', description='List pods', dry_run=True)
+          assert result['dry_run'] == True, f'Expected dry_run=True, got: {result}'
+          assert result['status'] == 'success', f'Expected success, got: {result[\"status\"]}'
           print('✓ Safe executor dry-run test passed')
-          
-          # Test command whitelisting
-          result = executor.run_command('ls', dry_run=True)
-          assert 'error' not in result.get('status', '')
-          print('✓ Safe executor whitelist test passed')
+
+          # Test dangerous command is blocked
+          result = executor.execute_command(
+              'kubectl delete pod myapp',
+              description='Delete pod - DANGEROUS',
+              context={'test': True},
+              dry_run=True
+          )
+          assert result['status'] == 'blocked', f'Expected blocked, got: {result[\"status\"]}'
+          assert result['danger_level'] == 'critical', f'Expected critical, got: {result[\"danger_level\"]}'
+          assert 'incident_id' in result, 'Expected incident_id in blocked result'
+          print('✓ Safe executor dangerous command block test passed')
+
+          # Test command not in allowed list is blocked
+          result = executor.execute_command(
+              'somecustom weird-cmd',
+              description='Unknown command',
+              dry_run=True
+          )
+          assert result['status'] == 'blocked', f'Expected blocked, got: {result[\"status\"]}'
+          print('✓ Safe executor allowlist test passed')
+
+          # Test scale-to-zero is blocked
+          result = executor.execute_command(
+              'kubectl scale deployment myapp --replicas=0',
+              description='Scale to zero - DANGEROUS',
+              dry_run=True
+          )
+          assert result['status'] == 'blocked', f'Expected blocked, got: {result[\"status\"]}'
+          print('✓ Safe executor scale-to-zero block test passed')
+
+          # Test blocked commands log is populated
+          log = executor.get_blocked_commands_log()
+          assert len(log) >= 2, f'Expected at least 2 blocked entries, got: {len(log)}'
+          print(f'✓ Blocked commands log contains {len(log)} entries')
           "
-      
+
       - name: Test K8s Tools (Mock)
         run: |
           python -c "
           import sys
           sys.path.insert(0, '.')
           from tools.k8s_tools import apply_k8s_manifest
-          
+
           # Test dry-run
           manifest = 'apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: test'
           result = apply_k8s_manifest(manifest, namespace='default', dry_run=True)
-          
+
           assert result['dry_run'] == True
           print('✓ K8s tools dry-run test passed')
           "
@@ -232,21 +262,21 @@ jobs:
   integration-test:
     name: Integration Test - Full Agent Flow
     runs-on: ubuntu-latest
-    
+
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.9'
-      
+
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           pip install pytest pytest-asyncio httpx
-      
+
       - name: Create test configuration
         run: |
           cat > .env << EOF
@@ -256,19 +286,19 @@ jobs:
           AUTO_APPLY=false
           TESTING=true
           EOF
-      
+
       - name: Start API Server (Background)
         run: |
           uvicorn api.server:app --host 0.0.0.0 --port 8000 &
           sleep 5
         env:
           TESTING: true
-      
+
       - name: Test Health Endpoint
         run: |
           curl -f http://localhost:8000/health || exit 1
           echo "✓ Health endpoint test passed"
-      
+
       - name: Test Manual Webhook - K8s Incident (Dummy)
         run: |
           curl -X POST http://localhost:8000/webhook/manual \
@@ -279,7 +309,7 @@ jobs:
               "pod_name": "dummy-pod",
               "labels": {"severity": "warning", "test": "true"}
             }' || echo "Expected to fail gracefully without real API key"
-      
+
       - name: Test Manual Webhook - CI/CD Incident (Dummy)
         run: |
           curl -X POST http://localhost:8000/webhook/manual \
@@ -291,7 +321,7 @@ jobs:
               "run_id": 12345,
               "labels": {"test": "true"}
             }' || echo "Expected to fail gracefully without real API key"
-      
+
       - name: Test Manual Webhook - ArgoCD Incident (Dummy)
         run: |
           curl -X POST http://localhost:8000/webhook/manual \
@@ -301,7 +331,7 @@ jobs:
               "app_name": "test-app",
               "labels": {"test": "true"}
             }' || echo "Expected to fail gracefully without real API key"
-      
+
       - name: Check Audit Endpoint
         run: |
           curl -f http://localhost:8000/audit || exit 1
@@ -310,30 +340,30 @@ jobs:
   security-scan:
     name: Security Scan
     runs-on: ubuntu-latest
-    
+
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.9'
-      
+
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install safety bandit
-      
+
       - name: Run Safety Check
         run: |
           pip install -r requirements.txt
           safety check || true
-      
+
       - name: Run Bandit Security Scan
         run: |
           bandit -r . -f json -o bandit-report.json || true
           bandit -r . -ll
-      
+
       - name: Upload Bandit Report
         uses: actions/upload-artifact@v4
         if: always()
@@ -344,17 +374,17 @@ jobs:
   docker-build:
     name: Docker Build Test
     runs-on: ubuntu-latest
-    
+
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
-      
+
       - name: Build Docker Image
         run: |
           docker build -t devops-ai-agent:test -f docker/Dockerfile .
-      
+
       - name: Test Docker Image
         run: |
           docker run --rm devops-ai-agent:test python --version
@@ -363,10 +393,10 @@ jobs:
   docs:
     name: Documentation Check
     runs-on: ubuntu-latest
-    
+
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Check Required Files
         run: |
           test -f README.md && echo "✓ README.md exists"
@@ -375,7 +405,7 @@ jobs:
           test -f requirements.txt && echo "✓ requirements.txt exists"
           test -f CONTRIBUTING.md && echo "✓ CONTRIBUTING.md exists"
           test -f MULTI_PLATFORM_GUIDE.md && echo "✓ MULTI_PLATFORM_GUIDE.md exists"
-      
+
       - name: Check Python Documentation
         run: |
           python -m pip install pydocstyle
