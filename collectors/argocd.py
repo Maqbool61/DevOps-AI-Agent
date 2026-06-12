@@ -12,6 +12,11 @@ import structlog
 log = structlog.get_logger()
 
 
+# SSL verification helper - set ARGOCD_INSECURE_SKIP_VERIFY=true only for self-signed certs
+def _get_verify_ssl():
+    return os.getenv('ARGOCD_INSECURE_SKIP_VERIFY', 'false').lower() != 'true'
+
+
 class ArgoCDCollector:
     def __init__(self):
         self.server_url = os.getenv("ARGOCD_SERVER_URL", "")
@@ -26,7 +31,7 @@ class ArgoCDCollector:
         if not self.server_url:
             return {"error": "ARGOCD_SERVER_URL not configured"}
 
-        async with httpx.AsyncClient(headers=self.headers, timeout=30, verify=False) as client:
+        async with httpx.AsyncClient(headers=self.headers, timeout=30, verify=_get_verify_ssl()) as client:
             # Get application details
             app_url = f"{self.server_url}/api/v1/applications/{app_name}"
             
@@ -135,7 +140,7 @@ class ArgoCDCollector:
             }
         }
 
-        async with httpx.AsyncClient(headers=self.headers, timeout=60, verify=False) as client:
+        async with httpx.AsyncClient(headers=self.headers, timeout=60, verify=_get_verify_ssl()) as client:
             try:
                 sync_resp = await client.post(sync_url, json=payload)
                 
@@ -169,7 +174,7 @@ class ArgoCDCollector:
         # Update application spec to target the specific revision
         app_url = f"{self.server_url}/api/v1/applications/{app_name}"
         
-        async with httpx.AsyncClient(headers=self.headers, timeout=30, verify=False) as client:
+        async with httpx.AsyncClient(headers=self.headers, timeout=30, verify=_get_verify_ssl()) as client:
             try:
                 # First, get current app spec
                 app_resp = await client.get(app_url)
@@ -207,7 +212,7 @@ class ArgoCDCollector:
 
         app_url = f"{self.server_url}/api/v1/applications/{app_name}"
         
-        async with httpx.AsyncClient(headers=self.headers, timeout=30, verify=False) as client:
+        async with httpx.AsyncClient(headers=self.headers, timeout=30, verify=_get_verify_ssl()) as client:
             try:
                 app_resp = await client.get(app_url)
                 if app_resp.status_code != 200:
