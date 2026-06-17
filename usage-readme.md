@@ -7,18 +7,25 @@ This guide shows how to install the DevOps AI Agent and how it automatically han
 ## Table of Contents
 
 1. [Installation](#installation)
-2. [Web Servers](#web-servers)
-3. [Nginx Issues](#nginx-issues)
-4. [Apache Issues](#apache-issues)
-5. [Timeout Problems](#timeout-problems)
-6. [Server Performance](#server-performance)
-7. [SSL/TLS Issues](#ssltls-issues)
-8. [Load Balancer Problems](#load-balancer-problems)
-9. [Database Connection Issues](#database-connection-issues)
-10. [Disk Space Problems](#disk-space-problems)
-11. [Memory Issues](#memory-issues)
-12. [Configure and Connect](#configure-and-connect)
-13. [Cloud Services (AWS, GCP, Azure)](#cloud-services-aws-gcp-azure)
+2. [Platform Features](#platform-features)
+3. [API & Webhooks](#api--webhooks)
+4. [Org Documentation & Storage](#org-documentation--storage)
+5. [Escalation & Ticketing](#escalation--ticketing)
+6. [Deployment Models](#deployment-models)
+7. [Testing](#testing)
+8. [Cloud Services (AWS, GCP, Azure)](#cloud-services-aws-gcp-azure)
+9. [Web Servers](#web-servers)
+10. [Nginx Issues](#nginx-issues)
+11. [Apache Issues](#apache-issues)
+12. [Timeout Problems](#timeout-problems)
+13. [Server Performance](#server-performance)
+14. [SSL/TLS Issues](#ssltls-issues)
+15. [Load Balancer Problems](#load-balancer-problems)
+16. [Database Connection Issues](#database-connection-issues)
+17. [Disk Space Problems](#disk-space-problems)
+18. [Memory Issues](#memory-issues)
+19. [Configure and Connect](#configure-and-connect)
+20. [Documentation Index](#documentation-index)
 
 ---
 
@@ -185,11 +192,21 @@ EMAIL_SMTP_PASSWORD=your-app-password
 EMAIL_FROM=devops-agent@yourcompany.com
 EMAIL_TO=sre-team@yourcompany.com
 
+# Org & storage (recommended)
+ORG_ID=acme-corp
+STORAGE_PROVIDER=memory   # production: s3, minio, gcs, azure
+
+# Escalation when agent cannot resolve
+ESCALATION_ENABLED=true
+ESCALATION_TIMEOUT_MINUTES=10
+ESCALATION_CHANNELS=slack,email   # add jira, zoho as needed
+
 # Safety (keep these for production)
 AUTO_APPLY=false
 ENABLE_SECURITY_SCANNING=true
 ENABLE_COMPLIANCE_CHECKS=true
 AGENT_EMERGENCY_STOP=false
+ENABLE_DATABASE_COLLECTION=false
 ```
 
 See `.env.example` for all options (Slack, GitHub, cloud credentials, ArgoCD, etc.).
@@ -224,25 +241,36 @@ nohup uvicorn api.server:app --host 0.0.0.0 --port 8000 --workers 2 \
 ```bash
 # 1. Health check
 curl http://localhost:8000/health
-# Expected: {"status":"healthy",...}
+# Expected: {"status":"ok","queue_worker":true,"storage_provider":"memory",...}
 
 # 2. Run setup verification script
 chmod +x scripts/verify_setup.sh
 ./scripts/verify_setup.sh
 
-# 3. Send a test webhook
+# 3. Upload an org runbook (optional)
+curl -X POST http://localhost:8000/orgs/acme-corp/docs \
+  -H "Content-Type: application/json" \
+  -d '{"path":"runbooks/test.md","content":"# Test runbook"}'
+
+# 4. Queue a test incident (async — processed by background worker)
 curl -X POST http://localhost:8000/webhook/manual \
   -H "Content-Type: application/json" \
+  -H "X-Org-ID: acme-corp" \
   -d '{
     "type": "server",
-    "labels": {"severity": "warning", "alertname": "TestAlert"}
+    "description": "Installation test alert",
+    "service": "nginx"
   }'
+# Expected: {"status":"queued","incident_id":"INC-..."}
 
-# 4. Check audit log
-curl http://localhost:8000/audit
+# 5. Poll org-scoped audit log (wait ~30s after step 4)
+curl "http://localhost:8000/audit?org_id=acme-corp"
+
+# 6. Or run automated API test
+./scripts/test_api_flow.sh
 ```
 
-If health check passes and the test webhook returns a response, the agent is installed correctly.
+If health check passes and the webhook returns `status: queued`, the agent is installed correctly.
 
 ---
 
@@ -252,12 +280,166 @@ If health check passes and the test webhook returns a response, the agent is ins
 - [ ] Repository cloned
 - [ ] Virtual environment created and activated
 - [ ] `pip install -r requirements.txt` completed
-- [ ] Cloud packages installed (if needed)
-- [ ] `.env` configured from `.env.example`
-- [ ] Email alerts configured
+- [ ] Cloud/storage packages installed (if needed: `boto3`, `google-cloud-storage`)
+- [ ] `.env` configured from `.env.example` (`ORG_ID`, `ANTHROPIC_API_KEY`, storage)
+- [ ] Email and/or Slack configured
+- [ ] Escalation channels configured (`ESCALATION_CHANNELS`)
 - [ ] Agent started (`uvicorn api.server:app`)
-- [ ] Health check passes (`/health`)
-- [ ] Monitoring webhook connected (Prometheus, Datadog, etc.)
+- [ ] Health check passes (`GET /health`)
+- [ ] Test incident queued and appears in `GET /audit?org_id=`
+- [ ] Monitoring webhook connected (Prometheus Alertmanager, GitHub, etc.)
+- [ ] SSH keys configured (if centralized agent fixes remote servers)
+
+---
+
+## Platform Features
+
+| Feature | Description | Config |
+|---------|-------------|--------|
+| **Durable queue** | Webhooks survive restarts; background worker processes incidents | `QUEUE_POLL_INTERVAL_SEC` |
+| **Cloud storage** | Audit, logs, checkpoints, org docs per org | `STORAGE_PROVIDER`, `STORAGE_BUCKET` |
+| **PII scrubbing** | Redacts emails, tokens, secrets before Claude/Slack/storage | Automatic |
+| **Anti-hallucination** | Requires tool evidence + Evidence section in diagnosis | `agent/grounding.py` |
+| **Checkpoints** | Resume mid-incident after agent crash | Automatic in storage |
+| **Org documentation** | Upload runbooks via API; injected into agent context | `POST /orgs/{org}/docs` |
+| **Auto-escalation** | Jira, Zoho, email, Slack when unresolved or DB issue | `ESCALATION_*`, `JIRA_*`, `ZOHO_*` |
+| **Claude retry** | Exponential backoff on API failures | `CLAUDE_API_RETRIES` |
+
+---
+
+## API & Webhooks
+
+Base URL: `http://localhost:8000` (or your deployed agent).
+
+| Method | Endpoint | Purpose |
+|--------|----------|---------|
+| `GET` | `/health` | Agent and queue worker status |
+| `GET` | `/audit?org_id=` | Org-scoped incident audit history |
+| `POST` | `/orgs/{org}/docs` | Upload runbooks/policies (JSON) |
+| `GET` | `/orgs/{org}/docs` | List org documentation |
+| `POST` | `/webhook/manual` | Manually queue an incident |
+| `POST` | `/webhook/alertmanager` | Prometheus Alertmanager |
+| `POST` | `/webhook/github` | GitHub Actions failures |
+
+**Org scoping:** Pass `X-Org-ID` header or set `ORG_ID` in `.env`. All data stored under `{org_id}/` in cloud storage.
+
+**Async processing:** Webhooks return immediately with `incident_id`. Poll `/audit` after 30–60 seconds.
+
+Full reference: [docs/API_REFERENCE.md](docs/API_REFERENCE.md)  
+Postman: import [postman/DevOps-AI-Agent.postman_collection.json](postman/DevOps-AI-Agent.postman_collection.json)
+
+### Example: remote EC2 Docker crash (centralized agent)
+
+```bash
+curl -X POST http://agent.internal:8000/webhook/manual \
+  -H "Content-Type: application/json" \
+  -H "X-Org-ID: acme-corp" \
+  -d '{
+    "type": "server",
+    "host": "ubuntu@10.0.1.50",
+    "service": "broken-app",
+    "description": "Docker container keeps restarting"
+  }'
+```
+
+Requires SSH from agent server → target EC2. See [docs/CENTRALIZED_DEPLOYMENT.md](docs/CENTRALIZED_DEPLOYMENT.md).
+
+---
+
+## Org Documentation & Storage
+
+### Upload runbooks
+
+```bash
+curl -X POST http://localhost:8000/orgs/acme-corp/docs \
+  -H "Content-Type: application/json" \
+  -d '{
+    "path": "runbooks/nginx-502.md",
+    "content": "# Nginx 502\n1. Check upstream\n2. Restart php-fpm\n3. nginx -t && systemctl reload nginx"
+  }'
+```
+
+### Storage providers
+
+```bash
+STORAGE_PROVIDER=memory   # local dev
+STORAGE_PROVIDER=s3        # AWS
+STORAGE_PROVIDER=minio     # MinIO / S3-compatible
+STORAGE_PROVIDER=gcs       # Google Cloud Storage
+STORAGE_PROVIDER=azure     # Azure Blob
+STORAGE_BUCKET=devops-agent
+AUDIT_RETENTION_DAYS=90
+```
+
+Storage layout per org:
+
+```text
+{org_id}/audit/          incident summaries
+{org_id}/logs/           tool output, conversations
+{org_id}/docs/           runbooks and policies
+{org_id}/queue/          durable incident queue
+{org_id}/checkpoints/    resume state
+```
+
+---
+
+## Escalation & Ticketing
+
+The agent auto-escalates when it **cannot resolve** within the timeout, hits a **database issue**, or **lacks evidence** to act safely.
+
+```bash
+ESCALATION_ENABLED=true
+ESCALATION_TIMEOUT_MINUTES=10    # use 5 for faster escalation
+ESCALATION_CHANNELS=slack,email,jira,zoho
+ESCALATION_ON_DB_ISSUES=true
+
+# Jira (optional)
+JIRA_ENABLED=true
+JIRA_URL=https://yourorg.atlassian.net
+JIRA_EMAIL=agent@company.com
+JIRA_API_TOKEN=...
+JIRA_PROJECT_KEY=OPS
+```
+
+Database incidents are escalated to humans/DBA by default (`ENABLE_DATABASE_COLLECTION=false`).
+
+Full guide: [docs/ESCALATION.md](docs/ESCALATION.md)
+
+---
+
+## Deployment Models
+
+| Model | Agent location | Best for |
+|-------|----------------|----------|
+| **Co-located** | Same EC2/VM as the app | Docker/server fixes on that host |
+| **Centralized** | Dedicated agent server | Production — one agent, many targets |
+| **Kubernetes** | Cluster deployment | EKS/GKE/AKS incidents via API |
+| **Docker Compose** | With MinIO for durable storage | Local/staging with persistence |
+
+- Centralized + remote EC2: [docs/CENTRALIZED_DEPLOYMENT.md](docs/CENTRALIZED_DEPLOYMENT.md)
+- EC2 Docker E2E test: [docs/E2E_EC2_DOCKER_TEST.md](docs/E2E_EC2_DOCKER_TEST.md)
+- Production deploy: [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)
+
+---
+
+## Testing
+
+```bash
+# Unit tests
+pytest tests/ -v
+
+# API smoke test
+./scripts/test_api_flow.sh
+
+# Simulate incidents (no cloud creds needed)
+python scripts/simulate_incident.py k8s
+python scripts/simulate_incident.py cicd
+
+# EC2 Docker crash-loop setup (run on target EC2)
+sudo bash scripts/ec2-docker-test-setup.sh
+```
+
+Postman: [docs/API_TESTING.md](docs/API_TESTING.md)
 
 ---
 
@@ -334,6 +516,7 @@ Or use the interactive installer:
 ```bash
 curl -X POST http://localhost:8000/webhook/manual \
   -H "Content-Type: application/json" \
+  -H "X-Org-ID: acme-corp" \
   -d '{
     "type": "cloud_aws",
     "resource_type": "eks",
@@ -1438,38 +1621,73 @@ curl http://localhost/health  # Test
 
 ## Configure and Connect
 
-After installation, enable automated fixes and connect your monitoring systems.
+After installation, connect monitoring systems and upload org runbooks.
 
-### 1. Enable Fix Categories
+### 1. Set organization and storage
 
 ```bash
-# Add to .env
-ENABLE_AUTO_FIX=true
-ENABLE_NGINX_FIXES=true
-ENABLE_APACHE_FIXES=true
-ENABLE_TIMEOUT_FIXES=true
+# .env
+ORG_ID=acme-corp
+STORAGE_PROVIDER=s3          # or minio, gcs, azure, memory
+STORAGE_BUCKET=devops-agent
 ```
 
-Restart the agent after changing `.env`.
+### 2. Upload org runbooks
 
-### 2. Connect Monitoring
+```bash
+curl -X POST http://$AGENT_URL/orgs/acme-corp/docs \
+  -H "Content-Type: application/json" \
+  -d '{"path":"runbooks/k8s-oom.md","content":"# OOM runbook\n..."}'
+```
+
+### 3. Connect Prometheus Alertmanager
 
 ```yaml
-# Prometheus AlertManager
 receivers:
-  - name: 'devops-ai-agent'
+  - name: devops-ai-agent
     webhook_configs:
-      - url: 'https://agent.company.com/webhook'
+      - url: 'http://devops-agent:8000/webhook/alertmanager'
+        send_resolved: true
 ```
 
-### 3. Review Agent Activity
+Add labels for org and remote host:
+
+```yaml
+labels:
+  org_id: acme-corp
+  host: ubuntu@10.0.1.50   # for centralized SSH to EC2
+```
+
+### 4. Connect GitHub Actions
+
+Repository → Settings → Webhooks:
+
+- URL: `https://agent.company.com/webhook/github`
+- Events: Workflow runs
+- Header: `X-Org-ID: acme-corp` (if supported) or set `GITHUB_ORG` in `.env`
+
+### 5. Centralized agent — SSH to remote servers
+
+On the agent server:
 
 ```bash
-# Check what the agent is fixing
+ssh-copy-id ubuntu@target-ec2-ip
+ssh ubuntu@target-ec2-ip 'docker ps'   # must work without password
+```
+
+Trigger with `"host": "ubuntu@target-ec2-ip"` in webhook body.
+
+### 6. Review agent activity
+
+```bash
+# Org-scoped audit (persistent in cloud storage)
+curl "http://localhost:8000/audit?org_id=acme-corp" | python3 -m json.tool
+
+# Agent process logs
 tail -f logs/agent.log
 
-# Review generated documentation
-ls documentation/runbooks/
+# List uploaded org docs
+curl http://localhost:8000/orgs/acme-corp/docs
 ```
 
 ---
@@ -1498,19 +1716,39 @@ ls documentation/runbooks/
 
 ---
 
+## Documentation Index
+
+| Topic | Document |
+|-------|----------|
+| **Quick start** | [docs/GETTING_STARTED.md](docs/GETTING_STARTED.md) |
+| **API reference** | [docs/API_REFERENCE.md](docs/API_REFERENCE.md) |
+| **API testing (Postman)** | [docs/API_TESTING.md](docs/API_TESTING.md) |
+| **Centralized deployment** | [docs/CENTRALIZED_DEPLOYMENT.md](docs/CENTRALIZED_DEPLOYMENT.md) |
+| **EC2 + Docker E2E test** | [docs/E2E_EC2_DOCKER_TEST.md](docs/E2E_EC2_DOCKER_TEST.md) |
+| **Escalation & ticketing** | [docs/ESCALATION.md](docs/ESCALATION.md) |
+| **Security** | [SECURITY_GUARANTEES.md](SECURITY_GUARANTEES.md) |
+| **Deployment** | [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) |
+| **Build Docker/package** | [docs/BUILD_AND_USAGE.md](docs/BUILD_AND_USAGE.md) |
+| **Platform support** | [docs/PLATFORM_SUPPORT.md](docs/PLATFORM_SUPPORT.md) |
+| **Organization rollout** | [docs/ORGANIZATIONAL_GUIDE.md](docs/ORGANIZATIONAL_GUIDE.md) |
+| **Architecture** | [ARCHITECTURE.md](ARCHITECTURE.md) |
+| **All docs** | [docs/README.md](docs/README.md) |
+| **Postman collection** | [postman/](postman/) |
+
+---
+
 ## Support
 
 **Questions?**
-- See `README.md` for overview
-- See `docs/GETTING_STARTED.md` for detailed setup
-- See `docs/ORGANIZATIONAL_GUIDE.md` for deployment
-- See `docs/PLATFORM_SUPPORT.md` for platforms
-- See `SECURITY_GUARANTEES.md` for security and safety
+- [README.md](README.md) — project overview
+- [docs/GETTING_STARTED.md](docs/GETTING_STARTED.md) — 15-minute setup
+- [docs/API_REFERENCE.md](docs/API_REFERENCE.md) — all endpoints
+- [SECURITY_GUARANTEES.md](SECURITY_GUARANTEES.md) — safety before production
 
 **Need help?**
-- Check generated documentation
-- Review audit logs
-- Contact your DevOps team
+- Check `GET /audit?org_id=` for incident history
+- Review escalation entries (`escalated: true` in audit)
+- Contact your DevOps/SRE team
 
 ---
 
@@ -1518,4 +1756,4 @@ ls documentation/runbooks/
 
 ---
 
-Last Updated: June 12, 2026
+Last Updated: June 17, 2026

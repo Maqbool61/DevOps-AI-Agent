@@ -17,6 +17,12 @@ All project documentation is organized here.
 - [`GETTING_STARTED.md`](GETTING_STARTED.md) - Quick start guide
 
 **Reference:**
+- [`API_REFERENCE.md`](API_REFERENCE.md) - **Full REST API reference (new endpoints)**
+- [`API_TESTING.md`](API_TESTING.md) - **Postman & curl testing guide**
+- [`ESCALATION.md`](ESCALATION.md) - **Auto-ticketing when agent cannot resolve**
+- [`COVERAGE_GAPS.md`](COVERAGE_GAPS.md) - **Helm, ArgoCD, Terraform, runbooks, suggest_fix, extensions**
+- [`E2E_EC2_DOCKER_TEST.md`](E2E_EC2_DOCKER_TEST.md) - **EC2 + Docker crash-loop E2E test**
+- [`../postman/`](../postman/) - Postman collection and environment
 - [`PLATFORM_SUPPORT.md`](PLATFORM_SUPPORT.md) - Complete platform support matrix
 - [`FEATURES_SUMMARY.md`](FEATURES_SUMMARY.md) - Feature quick reference
 - [`QUESTIONS_ANSWERED.md`](QUESTIONS_ANSWERED.md) - FAQ and detailed answers
@@ -74,6 +80,8 @@ All project documentation is organized here.
 - **Security**: [`../SECURITY_GUARANTEES.md`](../SECURITY_GUARANTEES.md)
 - **Deployment**: [`DEPLOYMENT.md`](DEPLOYMENT.md)
 - **Build (Python package + Docker)**: [`BUILD_AND_USAGE.md`](BUILD_AND_USAGE.md)
+- **API Reference**: [`API_REFERENCE.md`](API_REFERENCE.md)
+- **API Testing (Postman)**: [`API_TESTING.md`](API_TESTING.md)
 - **Organization Guide**: [`ORGANIZATIONAL_GUIDE.md`](ORGANIZATIONAL_GUIDE.md)
 
 ---

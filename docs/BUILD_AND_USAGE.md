@@ -276,19 +276,23 @@ curl http://localhost:8000/health
 ```bash
 curl -X POST http://localhost:8000/webhook/manual \
   -H "Content-Type: application/json" \
+  -H "X-Org-ID: acme-corp" \
   -d '{
     "type": "k8s",
     "namespace": "default",
-    "pod_name": "test-pod",
-    "labels": {"severity": "warning"}
+    "pod": "test-pod",
+    "description": "Test incident"
   }'
+# Response: {"status":"queued","incident_id":"INC-..."}
 ```
 
-**View audit log:**
+**View audit log** (poll after ~30s — processing is async):
 
 ```bash
-curl http://localhost:8000/audit
+curl "http://localhost:8000/audit?org_id=acme-corp"
 ```
+
+**API docs & Postman:** See [API_REFERENCE.md](API_REFERENCE.md), [API_TESTING.md](API_TESTING.md), and `postman/` folder.
 
 **Stop / restart:**
 

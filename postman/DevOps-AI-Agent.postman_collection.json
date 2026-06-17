@@ -1,0 +1,502 @@
+{
+  "info": {
+    "_postman_id": "devops-ai-agent-api-v1",
+    "name": "DevOps AI Agent API",
+    "description": "Complete API collection for the DevOps AI Agent.\n\n## Setup\n1. Import this collection and `DevOps-AI-Agent-Local.postman_environment.json`\n2. Select the environment\n3. Set `baseUrl`, `orgId`, and `ANTHROPIC_API_KEY` in your `.env` on the server\n4. Start the agent: `uvicorn api.server:app --reload --port 8000`\n\n## Org scoping\nMost endpoints use `orgId` (path param or `X-Org-ID` header). Data is stored per org in cloud storage.\n\n## Async processing\nWebhooks return `status: queued`. The background queue worker processes incidents. Poll `/audit` to see results.\n\n## Documentation\nSee `docs/API_REFERENCE.md` and `docs/API_TESTING.md` in the repository.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:8000" },
+    { "key": "orgId", "value": "acme-corp" },
+    { "key": "incidentId", "value": "" },
+    { "key": "docPath", "value": "runbooks/k8s-oom.md" }
+  ],
+  "item": [
+    {
+      "name": "Health & Audit",
+      "item": [
+        {
+          "name": "Health Check",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/health",
+              "host": ["{{baseUrl}}"],
+              "path": ["health"]
+            },
+            "description": "Returns agent status, storage provider, org_id, and queue worker state."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Status ok', () => {",
+                  "    const json = pm.response.json();",
+                  "    pm.expect(json.status).to.eql('ok');",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get Audit Log",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/audit?org_id={{orgId}}&limit=50",
+              "host": ["{{baseUrl}}"],
+              "path": ["audit"],
+              "query": [
+                { "key": "org_id", "value": "{{orgId}}", "description": "Organization ID (defaults to ORG_ID env on server)" },
+                { "key": "limit", "value": "50", "description": "Max events to return" }
+              ]
+            },
+            "description": "Returns org-scoped incident audit entries from cloud storage. Poll after triggering a webhook."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Has org_id', () => {",
+                  "    pm.expect(pm.response.json().org_id).to.eql(pm.environment.get('orgId'));",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        }
+      ],
+      "description": "Health probe and persistent audit trail endpoints."
+    },
+    {
+      "name": "Organization Documentation",
+      "item": [
+        {
+          "name": "Upload Doc (JSON)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"path\": \"runbooks/k8s-oom.md\",\n  \"content\": \"# K8s OOM Runbook\\n\\n## Symptoms\\n- Pod status: OOMKilled\\n- Exit code 137\\n\\n## Steps\\n1. Run `get_k8s_context` for pod logs\\n2. Increase memory limits to 512Mi\\n3. Notify #platform on Slack\\n\\n## Evidence required\\nAlways cite exact log lines before concluding.\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/orgs/{{orgId}}/docs",
+              "host": ["{{baseUrl}}"],
+              "path": ["orgs", "{{orgId}}", "docs"]
+            },
+            "description": "Upload runbooks, policies, or playbooks as text. Loaded into agent context during incidents."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Uploaded', () => pm.expect(pm.response.json().status).to.eql('uploaded'));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        },
+        {
+          "name": "Upload Doc (File)",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "file",
+                  "type": "file",
+                  "src": [],
+                  "description": "Select a .md, .txt, .yaml, .json, or .rst file"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/orgs/{{orgId}}/docs/upload?path={{docPath}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["orgs", "{{orgId}}", "docs", "upload"],
+              "query": [
+                { "key": "path", "value": "{{docPath}}", "description": "Storage path e.g. runbooks/k8s-oom.md" }
+              ]
+            },
+            "description": "Upload documentation from a file. Allowed: .md, .txt, .yaml, .yml, .json, .rst"
+          },
+          "response": []
+        },
+        {
+          "name": "List Docs",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/orgs/{{orgId}}/docs?prefix=runbooks",
+              "host": ["{{baseUrl}}"],
+              "path": ["orgs", "{{orgId}}", "docs"],
+              "query": [
+                { "key": "prefix", "value": "runbooks", "description": "Filter by path prefix (optional)" }
+              ]
+            },
+            "description": "List all documentation files for an organization."
+          },
+          "response": []
+        },
+        {
+          "name": "Get Doc",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/orgs/{{orgId}}/docs/{{docPath}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["orgs", "{{orgId}}", "docs", "{{docPath}}"]
+            },
+            "description": "Retrieve a single documentation file by path."
+          },
+          "response": []
+        },
+        {
+          "name": "Delete Doc",
+          "request": {
+            "method": "DELETE",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/orgs/{{orgId}}/docs/{{docPath}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["orgs", "{{orgId}}", "docs", "{{docPath}}"]
+            },
+            "description": "Delete a documentation file."
+          },
+          "response": []
+        }
+      ],
+      "description": "Org-scoped runbooks and policies stored in cloud storage. Injected into agent context during incident handling."
+    },
+    {
+      "name": "Webhooks",
+      "item": [
+        {
+          "name": "Manual Trigger — K8s",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-Org-ID", "value": "{{orgId}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"k8s\",\n  \"namespace\": \"default\",\n  \"pod\": \"api-pod-abc123\",\n  \"description\": \"Pod CrashLoopBackOff in default namespace\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/webhook/manual",
+              "host": ["{{baseUrl}}"],
+              "path": ["webhook", "manual"]
+            },
+            "description": "Manually queue a K8s incident. Returns incident_id — poll /audit for results."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Queued', () => {",
+                  "    const json = pm.response.json();",
+                  "    pm.expect(json.status).to.eql('queued');",
+                  "    pm.expect(json.incident_id).to.be.a('string');",
+                  "    pm.environment.set('incidentId', json.incident_id);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        },
+        {
+          "name": "Manual Trigger — CI/CD",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-Org-ID", "value": "{{orgId}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"cicd\",\n  \"repo\": \"acme-corp/api-service\",\n  \"run_id\": 12345678,\n  \"description\": \"GitHub Actions workflow failed on main branch\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/webhook/manual",
+              "host": ["{{baseUrl}}"],
+              "path": ["webhook", "manual"]
+            },
+            "description": "Manually queue a CI/CD pipeline failure incident."
+          },
+          "response": []
+        },
+        {
+          "name": "Manual Trigger — Server",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-Org-ID", "value": "{{orgId}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"server\",\n  \"description\": \"High memory usage on nginx server\",\n  \"service\": \"nginx\",\n  \"node\": \"web-01\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/webhook/manual",
+              "host": ["{{baseUrl}}"],
+              "path": ["webhook", "manual"]
+            },
+            "description": "Manually queue a server/Linux incident."
+          },
+          "response": []
+        },
+        {
+          "name": "Manual Trigger — ArgoCD",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-Org-ID", "value": "{{orgId}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"argocd\",\n  \"app_name\": \"production-api\",\n  \"description\": \"ArgoCD app OutOfSync and Degraded\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/webhook/manual",
+              "host": ["{{baseUrl}}"],
+              "path": ["webhook", "manual"]
+            },
+            "description": "Manually queue an ArgoCD GitOps incident."
+          },
+          "response": []
+        },
+        {
+          "name": "Alertmanager Webhook",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-Org-ID", "value": "{{orgId}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"alerts\": [\n    {\n      \"status\": \"firing\",\n      \"labels\": {\n        \"alertname\": \"PodCrashLooping\",\n        \"severity\": \"critical\",\n        \"namespace\": \"production\",\n        \"pod\": \"api-7d4f8b9c-xk2lp\"\n      },\n      \"annotations\": {\n        \"summary\": \"Pod api is crash looping\",\n        \"description\": \"Container main restarted 5 times in 10 minutes\"\n      }\n    }\n  ]\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/webhook/alertmanager",
+              "host": ["{{baseUrl}}"],
+              "path": ["webhook", "alertmanager"]
+            },
+            "description": "Simulates a Prometheus Alertmanager webhook. Queues one incident per firing alert."
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Queued alerts', () => {",
+                  "    const json = pm.response.json();",
+                  "    pm.expect(json.status).to.eql('queued');",
+                  "    pm.expect(json.incident_ids.length).to.be.above(0);",
+                  "    pm.environment.set('incidentId', json.incident_ids[0]);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        },
+        {
+          "name": "GitHub Actions Webhook (workflow_run failure)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-GitHub-Event", "value": "workflow_run" },
+              { "key": "X-Org-ID", "value": "{{orgId}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"repository\": {\n    \"full_name\": \"acme-corp/api-service\"\n  },\n  \"workflow_run\": {\n    \"id\": 987654321,\n    \"name\": \"CI\",\n    \"conclusion\": \"failure\",\n    \"head_branch\": \"main\",\n    \"head_sha\": \"abc123def456\",\n    \"html_url\": \"https://github.com/acme-corp/api-service/actions/runs/987654321\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/webhook/github",
+              "host": ["{{baseUrl}}"],
+              "path": ["webhook", "github"]
+            },
+            "description": "Simulates GitHub Actions workflow_run failure. If WEBHOOK_SECRET is set, add X-Hub-Signature-256 header."
+          },
+          "response": []
+        }
+      ],
+      "description": "Incident ingestion endpoints. All return status: queued — processing is async."
+    },
+    {
+      "name": "Slack Integration",
+      "item": [
+        {
+          "name": "Slack Action — Approve",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/x-www-form-urlencoded" }
+            ],
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {
+                  "key": "payload",
+                  "value": "{\"actions\":[{\"action_id\":\"approve_action\",\"value\":\"INC-20260101120000:azs0a2t1bHMgZGVwbG95bWVudC9hcGkgLW4gcHJvZHVjdGlvbg==\"}]}",
+                  "description": "Base64-encoded command after incident_id:"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/slack/action",
+              "host": ["{{baseUrl}}"],
+              "path": ["slack", "action"]
+            },
+            "description": "Handles Slack interactive button approvals. Normally called by Slack, not manually."
+          },
+          "response": []
+        },
+        {
+          "name": "Slack Action — Reject",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/x-www-form-urlencoded" }
+            ],
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {
+                  "key": "payload",
+                  "value": "{\"actions\":[{\"action_id\":\"reject_action\",\"value\":\"reject\"}]}"
+                }
+              ]
+            },
+            "url": {
+              "raw": "{{baseUrl}}/slack/action",
+              "host": ["{{baseUrl}}"],
+              "path": ["slack", "action"]
+            },
+            "description": "Handles Slack reject button."
+          },
+          "response": []
+        }
+      ],
+      "description": "Slack interactive message callbacks for human approval workflow."
+    },
+    {
+      "name": "End-to-End Test Flow",
+      "item": [
+        {
+          "name": "1. Health Check",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/health"
+          },
+          "response": []
+        },
+        {
+          "name": "2. Upload Runbook",
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"path\": \"runbooks/k8s-crashloop.md\",\n  \"content\": \"# CrashLoopBackOff\\n1. Fetch pod logs with get_k8s_context\\n2. Check exit code and OOM\\n3. Fix config or increase memory\\nEvidence: cite exact log lines.\"\n}"
+            },
+            "url": "{{baseUrl}}/orgs/{{orgId}}/docs"
+          },
+          "response": []
+        },
+        {
+          "name": "3. Trigger K8s Incident",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-Org-ID", "value": "{{orgId}}" }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"type\": \"k8s\",\n  \"namespace\": \"default\",\n  \"pod\": \"test-pod\",\n  \"description\": \"E2E test — CrashLoopBackOff\"\n}"
+            },
+            "url": "{{baseUrl}}/webhook/manual"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "if (pm.response.json().incident_id) {",
+                  "    pm.environment.set('incidentId', pm.response.json().incident_id);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        },
+        {
+          "name": "4. Poll Audit (wait ~30s first)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/audit?org_id={{orgId}}&limit=10"
+          },
+          "response": [],
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const incidentId = pm.environment.get('incidentId');",
+                  "if (incidentId) {",
+                  "    const events = pm.response.json().events || [];",
+                  "    const found = events.find(e => e.id === incidentId);",
+                  "    pm.test('Incident in audit (may need retry)', () => {",
+                  "        pm.expect(found, 'Run again after queue worker processes').to.not.be.undefined;",
+                  "    });",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        }
+      ],
+      "description": "Run these in order to test the full flow: health → upload runbook → trigger incident → poll audit."
+    }
+  ]
+}

@@ -3,6 +3,8 @@ Server Context Collector
 Gathers system health metrics, service status, and logs.
 """
 import asyncio
+from typing import Optional
+
 import structlog
 
 log = structlog.get_logger()
@@ -21,18 +23,24 @@ class ServerCollector:
         ("recent_errors", "journalctl -p err -n 50 --no-pager"),
     ]
 
-    async def collect(self) -> dict:
-        """Collect server health snapshot."""
-        result = {}
-        for key, cmd in self.SAFE_COMMANDS:
+    async def collect(self, host: Optional[str] = None) -> dict:
+        """Collect server health snapshot. Use host= for remote servers (centralized agent)."""
+        result = {"target_host": host or "localhost"}
+        commands = list(self.SAFE_COMMANDS) + [
+            ("docker_ps_all", "docker ps -a --format 'table {{.Names}}\t{{.Status}}\t{{.Image}}' 2>/dev/null || echo 'docker not available'"),
+            ("docker_unhealthy", "docker ps -a --filter 'status=restarting' --filter 'status=exited' --format '{{.Names}}: {{.Status}}' 2>/dev/null || true"),
+        ]
+        for key, cmd in commands:
             try:
+                if host and host not in ("localhost", "127.0.0.1"):
+                    cmd = f"ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 {host} '{cmd}'"
                 proc = await asyncio.create_subprocess_shell(
                     cmd,
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE,
                 )
-                stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=10)
-                result[key] = stdout.decode().strip()
+                stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=15)
+                result[key] = stdout.decode().strip() or stderr.decode().strip()
             except asyncio.TimeoutError:
                 result[key] = f"timeout running: {cmd}"
             except Exception as e:

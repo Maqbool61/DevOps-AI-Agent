@@ -4,12 +4,20 @@ Uses Claude's tool_use to reason, decide, and act on infrastructure incidents.
 """
 import json
 import os
-from typing import Any
+import time
+from datetime import datetime, timezone
+from typing import Any, Optional
 
 import anthropic
 import structlog
 
 from agent.classifier import classify_issue, get_cicd_platform
+from agent.grounding import (
+    build_evidence_reminder,
+    extract_suggested_fixes,
+    has_successful_remediation,
+    validate_resolution,
+)
 from agent.prompts import get_system_prompt
 from collectors.k8s import K8sCollector
 from collectors.github import GitHubCollector
@@ -18,6 +26,7 @@ from collectors.jenkins import JenkinsCollector
 from collectors.bamboo import BambooCollector
 from collectors.azure_devops import AzureDevOpsCollector
 from collectors.argocd import ArgoCDCollector
+from collectors.helm import HelmCollector
 from collectors.aws import AWSCollector
 from collectors.gcp import GCPCollector
 from collectors.azure import AzureCollector
@@ -27,9 +36,15 @@ from tools.k8s_tools import K8sTools
 from tools.github_tools import GitHubTools
 from tools.cicd_tools import CICDTools
 from tools.argocd_tools import ArgoCDTools
+from tools.helm_tools import HelmTools
+from tools.iac_tools import IaCTools
 from tools.cloud_tools import CloudTools
 from tools.notify import SlackNotifier
+from tools.fix_suggestions import validate_suggestion
 from collectors.database_policy import check_database_access
+from services.incident_store import IncidentStore
+from services.org_docs import OrgDocs
+from services.pii_scrubber import scrub_dict, scrub_text, scrub_value
 
 log = structlog.get_logger()
 
@@ -138,6 +153,38 @@ AGENT_TOOLS = [
             "required": ["message", "severity"],
         },
     },
+    {
+        "name": "suggest_fix",
+        "description": (
+            "Propose non-destructive fixes for the team to apply. Use when AUTO_APPLY is off, "
+            "approval is needed, or to document the exact remediation steps. "
+            "NEVER suggest delete, drop, rm -rf, terminate, or data-destructive commands. "
+            "Include concrete commands, YAML/config snippets, and verification steps."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "title": {"type": "string", "description": "Short fix title"},
+                "description": {"type": "string", "description": "What to do and why (cite evidence)"},
+                "commands": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Non-destructive shell/kubectl/docker commands to run manually or with approval",
+                },
+                "config_snippets": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "YAML, compose, nginx, or env config changes (full snippets)",
+                },
+                "verification_steps": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "How to confirm the fix worked",
+                },
+            },
+            "required": ["title", "description", "commands"],
+        },
+    },
     # ─── Multi-platform CI/CD Tools ───────────────────────────────────────────
     {
         "name": "get_cicd_logs",
@@ -233,6 +280,69 @@ AGENT_TOOLS = [
             "required": ["app_name"],
         },
     },
+    # ─── Helm Tools ───────────────────────────────────────────────────────────
+    {
+        "name": "get_helm_release",
+        "description": "Fetch Helm release status, history, values, and manifest preview.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "release_name": {"type": "string"},
+                "namespace": {"type": "string", "description": "Kubernetes namespace (default: default)"},
+            },
+            "required": ["release_name"],
+        },
+    },
+    {
+        "name": "helm_rollback",
+        "description": "Roll back a Helm release to a previous revision. Never uninstall.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "release_name": {"type": "string"},
+                "namespace": {"type": "string"},
+                "revision": {"type": "integer", "description": "Target revision (omit for previous)"},
+            },
+            "required": ["release_name", "namespace"],
+        },
+    },
+    {
+        "name": "helm_upgrade",
+        "description": "Upgrade a Helm release. Always dry_run=true first. No uninstall.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "release_name": {"type": "string"},
+                "chart": {"type": "string", "description": "Chart reference e.g. ./chart or repo/chart"},
+                "namespace": {"type": "string"},
+                "values_yaml": {"type": "string", "description": "Optional values YAML content"},
+                "dry_run": {"type": "boolean", "description": "Default true — validate before applying"},
+            },
+            "required": ["release_name", "chart", "namespace"],
+        },
+    },
+    # ─── Terraform / IaC Tools (read-only) ────────────────────────────────────
+    {
+        "name": "terraform_validate",
+        "description": "Run terraform validate in a workspace (read-only).",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "workspace_path": {"type": "string", "description": "Path to Terraform module root"},
+            },
+        },
+    },
+    {
+        "name": "terraform_plan",
+        "description": "Run terraform plan to detect drift (read-only — never apply).",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "workspace_path": {"type": "string"},
+                "extra_args": {"type": "string", "description": "Optional plan flags e.g. -target=module.vpc"},
+            },
+        },
+    },
     # ─── Cloud Provider Tools ─────────────────────────────────────────────────
     {
         "name": "get_cloud_resource",
@@ -297,6 +407,8 @@ class DevOpsAgent:
         # New CI/CD and cloud tools
         self.cicd_tools = CICDTools()
         self.argocd_tools = ArgoCDTools()
+        self.helm_tools = HelmTools()
+        self.iac_tools = IaCTools()
         self.cloud_tools = CloudTools()
         
         self.notifier = SlackNotifier()
@@ -314,6 +426,7 @@ class DevOpsAgent:
         
         # ArgoCD collector
         self.argocd_collector = ArgoCDCollector()
+        self.helm_collector = HelmCollector()
         
         # Cloud collectors
         self.aws_collector = AWSCollector()
@@ -323,61 +436,124 @@ class DevOpsAgent:
         self.max_steps = int(os.getenv("MAX_AGENT_STEPS", "10"))
         self.auto_apply = os.getenv("AUTO_APPLY", "false").lower() == "true"
         self._pending_approvals: dict[str, str] = {}
+        self.incident_store = IncidentStore()
+        self.org_docs = OrgDocs()
+        self.claude_retries = int(os.getenv("CLAUDE_API_RETRIES", "3"))
+        self.claude_retry_delay = float(os.getenv("CLAUDE_RETRY_DELAY_SEC", "2"))
+        self.model = os.getenv("CLAUDE_MODEL", "claude-sonnet-4-20250514")
 
-    async def run(self, context: dict) -> dict:
+    def _org_id(self, context: dict) -> str:
+        return context.get("org_id") or os.getenv("ORG_ID", "default")
+
+    async def run(
+        self,
+        context: dict,
+        incident_id: Optional[str] = None,
+        resume: bool = True,
+    ) -> dict:
         """Main agent loop: collect context → reason → act → return result."""
-        log.info("Agent starting", type=context.get("type"), source=context.get("source"))
-
-        # Enrich context with collected data
-        full_context = await self._collect_context(context)
-
-        # Build initial message
+        org_id = self._org_id(context)
+        incident_id = incident_id or context.get("incident_id") or (
+            f"INC-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}"
+        )
         issue_type = context.get("type", "server")
-        system_prompt = get_system_prompt(issue_type)
 
-        messages = [
-            {
-                "role": "user",
-                "content": (
-                    f"Incident detected. Diagnose and fix this:\n\n"
-                    f"```json\n{json.dumps(full_context, indent=2)}\n```\n\n"
-                    f"Use tools to gather more context if needed, then apply the fix. "
-                    f"Always notify Slack with what you found and what you did."
-                ),
-            }
-        ]
+        log.info(
+            "Agent starting",
+            type=issue_type,
+            source=context.get("source"),
+            incident_id=incident_id,
+            org_id=org_id,
+        )
 
-        actions_taken = []
+        actions_taken: list = []
         steps = 0
+        messages: list = []
+        full_context: dict = {}
 
-        # Agentic loop
+        checkpoint = self.incident_store.load_checkpoint(org_id, incident_id) if resume else None
+        if checkpoint:
+            log.info("Resuming from checkpoint", incident_id=incident_id, steps=checkpoint.get("steps"))
+            messages = checkpoint.get("messages", [])
+            actions_taken = checkpoint.get("actions_taken", [])
+            steps = checkpoint.get("steps", 0)
+            full_context = checkpoint.get("full_context", {})
+            issue_type = checkpoint.get("issue_type", issue_type)
+        else:
+            full_context = scrub_dict(await self._collect_context(context))
+            org_doc_context = self.org_docs.get_context_for_agent(org_id, issue_type)
+            self.incident_store.save_log(org_id, incident_id, "collected_context.json", full_context)
+
+            user_content = (
+                f"Incident `{incident_id}` for org `{org_id}`. Diagnose and fix this:\n\n"
+                f"```json\n{json.dumps(full_context, indent=2)}\n```\n\n"
+            )
+            if org_doc_context:
+                user_content += f"{org_doc_context}\n\n"
+            user_content += (
+                "Use tools to gather live evidence before concluding. "
+                "Cite exact tool output in your Evidence section.\n\n"
+                "RESOLUTION ORDER:\n"
+                "1. Diagnose with collector/tool evidence\n"
+                "2. Apply safe auto-fix if AUTO_APPLY allows\n"
+                "3. If collectors cannot fix, tools are blocked, or data is incomplete — "
+                "use suggest_fix with non-destructive commands and config snippets (FALLBACK)\n"
+                "4. Always notify_slack with findings and suggested/applied fixes\n"
+            )
+            if full_context.get("collection_error"):
+                user_content += (
+                    "\nNOTE: Initial collection was partial or failed. "
+                    "Use suggest_fix to provide manual non-destructive remediation steps.\n"
+                )
+            if context.get("raw_logs"):
+                user_content += "\nPartial logs provided in context — use suggest_fix if remote access is unavailable.\n"
+            messages = [{"role": "user", "content": scrub_text(user_content)}]
+
+        system_prompt = get_system_prompt(issue_type)
+        grounding_retries = 0
+
         while steps < self.max_steps:
             steps += 1
-            log.info("Agent step", step=steps)
+            log.info("Agent step", step=steps, incident_id=incident_id)
 
-            response = self.client.messages.create(
-                model="claude-sonnet-4-20250514",
-                max_tokens=4096,
-                system=system_prompt,
-                tools=AGENT_TOOLS,
-                messages=messages,
-            )
-
-            # Collect assistant message
+            response = self._call_claude(system_prompt, messages)
             messages.append({"role": "assistant", "content": response.content})
 
             if response.stop_reason == "end_turn":
-                # Done — extract final text
                 final_text = next(
                     (b.text for b in response.content if hasattr(b, "text")), ""
                 )
-                return {
-                    "resolved": True,
+                validation = validate_resolution(issue_type, actions_taken, final_text)
+                if not validation["grounded"] and grounding_retries < 2 and steps < self.max_steps:
+                    grounding_retries += 1
+                    messages.append({
+                        "role": "user",
+                        "content": build_evidence_reminder(validation),
+                    })
+                    self._save_checkpoint(org_id, incident_id, messages, actions_taken, steps, full_context, issue_type)
+                    continue
+
+                resolved = validation["grounded"] and (
+                    has_successful_remediation(actions_taken)
+                    or validation.get("has_suggestions")
+                )
+                suggested_fixes = extract_suggested_fixes(actions_taken)
+                result = {
+                    "resolved": resolved,
                     "diagnosis": final_text,
                     "actions": actions_taken,
                     "steps": steps,
                     "reasoning": final_text,
+                    "grounding": validation,
+                    "suggested_fixes": suggested_fixes,
+                    "fix_applied": has_successful_remediation(actions_taken),
+                    "suggestions_only": bool(suggested_fixes) and not has_successful_remediation(actions_taken),
+                    "incident_id": incident_id,
+                    "org_id": org_id,
                 }
+                self.incident_store.save_conversation(org_id, incident_id, messages)
+                self.incident_store.delete_checkpoint(org_id, incident_id)
+                return result
 
             if response.stop_reason == "tool_use":
                 tool_results = []
@@ -385,27 +561,74 @@ class DevOpsAgent:
                     if block.type != "tool_use":
                         continue
 
-                    log.info("Tool call", tool=block.name, input=block.input)
+                    log.info("Tool call", tool=block.name, input=block.input, incident_id=incident_id)
                     result = await self._execute_tool(block.name, block.input, context)
-                    actions_taken.append({"tool": block.name, "input": block.input, "result": result})
-
+                    scrubbed_result = scrub_value(result)
+                    actions_taken.append({
+                        "tool": block.name,
+                        "input": scrub_dict(block.input) if isinstance(block.input, dict) else block.input,
+                        "result": scrubbed_result,
+                    })
+                    self.incident_store.save_log(
+                        org_id, incident_id,
+                        f"step_{steps:03d}_tool_{block.name}.json",
+                        {"input": block.input, "result": scrubbed_result},
+                    )
                     tool_results.append({
                         "type": "tool_result",
                         "tool_use_id": block.id,
-                        "content": json.dumps(result),
+                        "content": json.dumps(scrubbed_result),
                     })
 
                 messages.append({"role": "user", "content": tool_results})
+                self._save_checkpoint(org_id, incident_id, messages, actions_taken, steps, full_context, issue_type)
                 continue
 
-            break  # Unexpected stop reason
+            break
 
-        return {
+        result = {
             "resolved": False,
             "diagnosis": "Max steps reached without resolution",
             "actions": actions_taken,
             "steps": steps,
+            "incident_id": incident_id,
+            "org_id": org_id,
         }
+        self.incident_store.save_conversation(org_id, incident_id, messages)
+        self._save_checkpoint(org_id, incident_id, messages, actions_taken, steps, full_context, issue_type)
+        return result
+
+    def _save_checkpoint(self, org_id, incident_id, messages, actions_taken, steps, full_context, issue_type):
+        self.incident_store.save_checkpoint(
+            org_id, incident_id, messages, actions_taken, steps, full_context, issue_type
+        )
+
+    def _call_claude(self, system_prompt: str, messages: list):
+        """Call Claude with exponential backoff retry on transient failures."""
+        last_error = None
+        for attempt in range(1, self.claude_retries + 1):
+            try:
+                return self.client.messages.create(
+                    model=self.model,
+                    max_tokens=4096,
+                    system=system_prompt,
+                    tools=AGENT_TOOLS,
+                    messages=messages,
+                )
+            except (
+                anthropic.APIConnectionError,
+                anthropic.RateLimitError,
+                anthropic.InternalServerError,
+                anthropic.APITimeoutError,
+            ) as e:
+                last_error = e
+                if attempt < self.claude_retries:
+                    delay = self.claude_retry_delay * (2 ** (attempt - 1))
+                    log.warning("Claude API retry", attempt=attempt, delay=delay, error=str(e))
+                    time.sleep(delay)
+                else:
+                    raise
+        raise last_error  # type: ignore[misc]
 
     async def execute_approved_action(self, incident_id: str, command: str):
         """Execute a command that was approved via Slack."""
@@ -452,6 +675,21 @@ class DevOpsAgent:
                     )
             elif issue_type == "argocd" and context.get("app_name"):
                 enriched["argocd_data"] = await self.argocd_collector.collect(context["app_name"])
+            elif issue_type == "helm" and context.get("release_name"):
+                enriched["helm_data"] = await self.helm_collector.collect(
+                    context["release_name"],
+                    context.get("namespace", "default"),
+                )
+            elif issue_type == "terraform":
+                workspace = context.get("workspace_path") or context.get("terraform_workspace")
+                if workspace:
+                    enriched["terraform_validate"] = await self.iac_tools.terraform_validate(workspace)
+                    enriched["terraform_plan"] = await self.iac_tools.terraform_plan(workspace)
+                else:
+                    enriched["terraform_note"] = (
+                        "No workspace_path in context. Use terraform_plan/validate tools or set "
+                        "TERRAFORM_WORKSPACE_DIR."
+                    )
             elif issue_type == "cloud_aws" and context.get("resource_type") and context.get("resource_id"):
                 rt = context["resource_type"]
                 blocked = check_database_access(rt, cloud="aws")
@@ -480,7 +718,9 @@ class DevOpsAgent:
                         rt, context["resource_id"], **context.get("params", {})
                     )
             elif issue_type == "server":
-                enriched["server_data"] = await self.server_collector.collect()
+                target_host = context.get("host") or context.get("node")
+                enriched["target_host"] = target_host or "localhost"
+                enriched["server_data"] = await self.server_collector.collect(host=target_host)
         except Exception as e:
             log.warning("Context collection partial failure", error=str(e))
             enriched["collection_error"] = str(e)
@@ -524,7 +764,8 @@ class DevOpsAgent:
                     inputs["new_content"], inputs["pr_title"], inputs["pr_body"],
                 )
             elif name == "run_shell_command":
-                return await self.executor.run_safe(inputs["command"], host=inputs.get("host"))
+                host = inputs.get("host") or context.get("host") or context.get("node")
+                return await self.executor.run_safe(inputs["command"], host=host)
             
             # ─── Multi-platform CI/CD Tools ────────────────────────────────────
             elif name == "get_cicd_logs":
@@ -598,6 +839,40 @@ class DevOpsAgent:
                     inputs["app_name"],
                     limit=inputs.get("limit", 10)
                 )
+
+            # ─── Helm Tools ────────────────────────────────────────────────────
+            elif name == "get_helm_release":
+                return await self.helm_tools.get_release(
+                    inputs["release_name"],
+                    inputs.get("namespace", "default"),
+                )
+            elif name == "helm_rollback":
+                return await self.helm_tools.rollback(
+                    inputs["release_name"],
+                    inputs["namespace"],
+                    revision=inputs.get("revision"),
+                    auto_apply=self.auto_apply,
+                    notifier=self.notifier,
+                )
+            elif name == "helm_upgrade":
+                return await self.helm_tools.upgrade(
+                    inputs["release_name"],
+                    inputs["chart"],
+                    inputs["namespace"],
+                    values_yaml=inputs.get("values_yaml"),
+                    dry_run=inputs.get("dry_run", True),
+                    auto_apply=self.auto_apply,
+                    notifier=self.notifier,
+                )
+
+            # ─── Terraform / IaC Tools ─────────────────────────────────────────
+            elif name == "terraform_validate":
+                return await self.iac_tools.terraform_validate(inputs.get("workspace_path"))
+            elif name == "terraform_plan":
+                return await self.iac_tools.terraform_plan(
+                    inputs.get("workspace_path"),
+                    extra_args=inputs.get("extra_args", "-input=false"),
+                )
             
             # ─── Cloud Provider Tools ──────────────────────────────────────────
             elif name == "get_cloud_resource":
@@ -639,7 +914,26 @@ class DevOpsAgent:
                     **inputs.get("additional_params", {})
                 )
             
-            # ─── Notifications ─────────────────────────────────────────────────
+            # ─── Notifications & suggestions ───────────────────────────────────
+            elif name == "suggest_fix":
+                suggestion = validate_suggestion(
+                    inputs["title"],
+                    inputs["description"],
+                    inputs.get("commands", []),
+                    inputs.get("config_snippets"),
+                )
+                if suggestion.get("recorded"):
+                    verification = inputs.get("verification_steps", [])
+                    suggestion["verification_steps"] = verification
+                    await self.notifier.send_fix_suggestion(
+                        inputs["title"],
+                        inputs["description"],
+                        suggestion["commands"],
+                        config_snippets=suggestion.get("config_snippets"),
+                        verification_steps=verification,
+                    )
+                return suggestion
+
             elif name == "notify_slack":
                 await self.notifier.send_message(
                     inputs["message"],

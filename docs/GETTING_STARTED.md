@@ -69,6 +69,10 @@ SLACK_APPROVAL_CHANNEL=devops-approvals
 # Required: GitHub integration
 GITHUB_TOKEN=ghp_your_github_token_here
 
+# Organization & storage (recommended)
+ORG_ID=acme-corp
+STORAGE_PROVIDER=memory   # use minio/s3/gcs/azure in production
+
 # Safety: Start with manual approval
 AUTO_APPLY=false
 ```
@@ -99,32 +103,90 @@ Open a new terminal and test the health endpoint:
 curl http://localhost:8000/health
 
 # Expected response:
-# {"status":"healthy","version":"1.0.0"}
+# {"status":"ok","auto_apply":"false","storage_provider":"memory","org_id":"acme-corp","queue_worker":true}
 ```
 
-Test with a dummy incident:
+Upload an org runbook (loaded into agent context during incidents):
+
+```bash
+curl -X POST http://localhost:8000/orgs/acme-corp/docs \
+  -H "Content-Type: application/json" \
+  -d '{
+    "path": "runbooks/k8s-oom.md",
+    "content": "# OOM Runbook\n1. Check pod logs\n2. Increase memory limits"
+  }'
+```
+
+Test with a dummy incident (queued — processed async by background worker):
 
 ```bash
 # Simulate a Kubernetes incident
 curl -X POST http://localhost:8000/webhook/manual \
   -H "Content-Type: application/json" \
+  -H "X-Org-ID: acme-corp" \
   -d '{
     "type": "k8s",
     "namespace": "default",
-    "pod_name": "test-pod",
-    "labels": {"severity": "warning"}
+    "pod": "test-pod",
+    "description": "CrashLoopBackOff test"
   }'
 
-# Check the agent logs in the first terminal
-# Check Slack for notifications (if configured)
+# Response: {"status":"queued","incident_id":"INC-..."}
+# Wait ~30s, then check audit log (see step 6)
 ```
+
+**Or use Postman:** Import `postman/DevOps-AI-Agent.postman_collection.json` and run the **End-to-End Test Flow** folder. See [`docs/API_TESTING.md`](API_TESTING.md).
 
 ### 6. View Results
 
 ```bash
-# View audit log of all agent actions
-curl http://localhost:8000/audit | python -m json.tool
+# View org-scoped audit log (poll after queuing — processing is async)
+curl "http://localhost:8000/audit?org_id=acme-corp" | python3 -m json.tool
+
+# Or run the automated test script
+./scripts/test_api_flow.sh
 ```
+
+### 7. Escalation (auto-ticketing)
+
+If the agent cannot resolve an incident within **10 minutes** (configurable), hits a **database issue**, or lacks evidence to act safely, it automatically:
+
+- Sends a **Slack** escalation message
+- Sends an **email** to the team
+- Creates a **Jira** or **Zoho Desk** ticket (if configured)
+
+```bash
+# Configure in .env
+ESCALATION_ENABLED=true
+ESCALATION_TIMEOUT_MINUTES=10
+ESCALATION_CHANNELS=slack,email,jira
+
+# Test a DB incident (always escalates)
+curl -X POST http://localhost:8000/webhook/manual \
+  -H "Content-Type: application/json" \
+  -H "X-Org-ID: acme-corp" \
+  -d '{
+    "type": "cloud_aws",
+    "resource_type": "rds",
+    "resource_id": "prod-db-01",
+    "description": "RDS connection timeout"
+  }'
+```
+
+See [`docs/ESCALATION.md`](ESCALATION.md) for full setup.
+
+### 8. Full E2E test: EC2 + Docker crash loop
+
+For a real-world test (EC2 → Docker → broken container → agent fixes it), see:
+
+**[`docs/E2E_EC2_DOCKER_TEST.md`](E2E_EC2_DOCKER_TEST.md)**
+
+Quick summary:
+1. Launch EC2 (t3.small, Ubuntu, ports 22 + 8000)
+2. Run `scripts/ec2-docker-test-setup.sh` on EC2
+3. Deploy agent on same EC2 with `AUTO_APPLY=true`
+4. Trigger: `POST /webhook/manual` with `type: server`
+5. Poll `GET /audit?org_id=acme-corp`
 
 Congratulations! Your agent is running locally. 
 

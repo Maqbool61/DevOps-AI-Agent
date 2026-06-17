@@ -16,6 +16,8 @@ def classify_issue(alertname: str, labels: dict) -> str:
         - cloud_gcp: GCP resource issues
         - cloud_azure: Azure resource issues
         - argocd: ArgoCD deployment issues
+        - helm: Helm chart/release issues
+        - terraform: Terraform/IaC drift and validation (read-only)
     """
     name = alertname.lower()
 
@@ -32,6 +34,10 @@ def classify_issue(alertname: str, labels: dict) -> str:
                        "service", "host", "node", "network", "ssh", "systemd"]
     
     argocd_keywords = ["argocd", "argo", "gitops", "sync"]
+
+    helm_keywords = ["helm", "chart", "helmrelease", "release failed"]
+
+    terraform_keywords = ["terraform", "tfstate", "tf plan", "iac drift", "infrastructure drift"]
     
     aws_keywords = [
         "ec2", "ecs", "eks", "fargate", "lambda", "rds", "aws", "cloudwatch",
@@ -51,9 +57,13 @@ def classify_issue(alertname: str, labels: dict) -> str:
         "cosmosdb", "redis", "application-gateway", "service-bus",
     ]
 
-    # Check ArgoCD first (most specific)
+    # Check ArgoCD / Helm / Terraform (specific GitOps & IaC)
     if any(k in name for k in argocd_keywords):
         return "argocd"
+    if any(k in name for k in helm_keywords):
+        return "helm"
+    if any(k in name for k in terraform_keywords):
+        return "terraform"
     
     # Check CI/CD before K8s (to catch "deployment" in CICD context)
     if any(k in name for k in cicd_keywords):
@@ -90,6 +100,10 @@ def classify_issue(alertname: str, labels: dict) -> str:
         return "cicd"
     if labels.get("argocd_app"):
         return "argocd"
+    if labels.get("helm_release") or labels.get("chart"):
+        return "helm"
+    if labels.get("terraform_workspace") or labels.get("tf_workspace"):
+        return "terraform"
     if labels.get("cloud_provider"):
         cloud = labels["cloud_provider"].lower()
         if "aws" in cloud:

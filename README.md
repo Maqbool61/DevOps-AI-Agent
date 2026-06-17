@@ -13,7 +13,7 @@ This agent is your **24/7 on-call teammate** that handles:
 - **CI/CD Pipeline Failures** (GitHub Actions, GitLab CI, Jenkins, Azure DevOps, Bamboo)
 - **Kubernetes Issues** (CrashLoopBackOff, OOMKilled, ImagePullBackOff, ConfigMap errors)
 - **Cloud Infrastructure** (AWS EC2/ECS/Lambda, GCP GCE/Cloud Run, Azure VMs/AKS)
-- **GitOps Deployments** (ArgoCD sync failures, rollbacks)
+- **GitOps Deployments** (ArgoCD sync failures, Helm release errors, rollbacks)
 - **Container Builds** (Dockerfile optimization, build errors)
 - **Server Issues** (systemd failures, disk/CPU/memory alerts)
 
@@ -21,8 +21,11 @@ This agent is your **24/7 on-call teammate** that handles:
 
 - **Reduce Alert Fatigue**: Let AI handle repetitive incidents
 - **Faster MTTR**: Automated diagnosis and remediation in minutes
-- **Learn from Operations**: Full audit trail of every decision
-- **Safe by Default**: Dry-run first, approval gates, command whitelisting
+- **Durable audit trail**: Org-scoped logs in S3, MinIO, GCS, or Azure Blob
+- **Safe by Default**: Dry-run first, approval gates, command whitelisting, PII scrubbing
+- **Grounded AI**: Requires tool evidence before claiming fixes — reduces hallucination
+- **Auto-escalation**: Creates Jira/Zoho tickets + Slack/email when the agent cannot resolve
+- **Centralized or co-located**: One agent server can fix remote EC2/K8s/cloud via SSH and APIs
 - **Plugin Architecture**: Easy to extend with custom collectors and tools
 
 ---
@@ -30,42 +33,33 @@ This agent is your **24/7 on-call teammate** that handles:
 ## Architecture
 
 ```
-┌─────────────────┐
-│  Alert Sources  │
-│                 │
-│  • CI/CD        │
-│  • Prometheus   │
-│  • CloudWatch   │
-│  • PagerDuty    │
-│  • Custom       │
-└────────┬────────┘
-         │
-         ▼
-┌─────────────────┐
-│  Webhook API    │
-│  (FastAPI)      │
-└────────┬────────┘
-         │
-         ▼
-┌─────────────────┐       ┌──────────────────┐
-│ Log Collectors  │──────▶│  Claude AI Agent │
-│  (Plugins)      │       │  (Reasoning Loop)│
-│                 │       └─────────┬────────┘
-│  • K8s          │                 │
-│  • CI/CD        │                 ▼
-│  • Cloud        │       ┌──────────────────┐
-│  • ArgoCD       │       │   Tool Executor  │
-│  • Docker       │       │   (Safe Actions) │
-│  • Server       │       └─────────┬────────┘
-└─────────────────┘                 │
-                                    ▼
-                          ┌──────────────────┐
-                          │  Notifications   │
-                          │  • Slack         │
-                          │  • Audit Log     │
-                          │  • PagerDuty     │
-                          └──────────────────┘
+┌──────────────────────────────────────────────────────────────────┐
+│                     Alert Sources                                 │
+│  GitHub Actions · Alertmanager · PagerDuty · Manual /webhook     │
+└────────────────────────────┬─────────────────────────────────────┘
+                             │  POST /webhook/*
+                             ▼
+┌──────────────────────────────────────────────────────────────────┐
+│              Central Agent Server (FastAPI)                       │
+│  ┌─────────────┐  ┌──────────────┐  ┌─────────────────────────┐ │
+│  │ Incident    │→ │ Claude Agent │→ │ Safe Executor           │ │
+│  │ Queue       │  │ (grounded)   │  │ SSH · kubectl · docker  │ │
+│  └─────────────┘  └──────────────┘  └─────────────────────────┘ │
+└──────┬──────────────────┬───────────────────────┬────────────────┘
+       │                  │                       │
+       ▼                  ▼                       ▼
+┌─────────────┐   ┌──────────────┐      ┌───────────────────────┐
+│ Cloud       │   │ Org docs +   │      │ Notifications         │
+│ Storage     │   │ audit logs   │      │ Slack · Email · Jira  │
+│ S3/MinIO/   │   │ checkpoints  │      │ Zoho · Escalation     │
+│ GCS/Azure   │   │ (per org)    │      └───────────────────────┘
+└─────────────┘   └──────────────┘
+       │
+       ▼
+ Remote targets: EC2 (SSH) · EKS/GKE/AKS (API) · AWS/GCP/Azure (API)
 ```
+
+**Processing model:** Webhooks return `status: queued` immediately. A background worker processes incidents, saves checkpoints (resume after crash), and writes audit/logs to org-scoped cloud storage.
 
 ---
 
@@ -157,7 +151,14 @@ The agent handles routine tasks so your team focuses on complex problems:
 - Log rotation
 - Health check failures
 
-**See [usage-readme.md](usage-readme.md) for installation steps and the complete list of automated fixes.**
+**See [usage-readme.md](usage-readme.md) for installation, API usage, platform features, and the complete list of automated fixes.**
+
+| Quick links | |
+|-------------|---|
+| [Getting Started](docs/GETTING_STARTED.md) | 15-minute setup |
+| [API Reference](docs/API_REFERENCE.md) | Webhooks, audit, org docs |
+| [Centralized Deployment](docs/CENTRALIZED_DEPLOYMENT.md) | One agent → many servers |
+| [E2E EC2 Docker Test](docs/E2E_EC2_DOCKER_TEST.md) | Full crash-loop test |
 
 **Build as Python package or Docker image:** [docs/BUILD_AND_USAGE.md](docs/BUILD_AND_USAGE.md)
 
@@ -492,19 +493,43 @@ See [.env.example](.env.example) for all configuration options.
 # Start the agent API server
 uvicorn api.server:app --reload --port 8000
 
-# In another terminal, test with a manual incident
+# In another terminal, test with a manual incident (queued — async processing)
 curl -X POST http://localhost:8000/webhook/manual \
   -H "Content-Type: application/json" \
+  -H "X-Org-ID: acme-corp" \
   -d '{
     "type": "k8s",
     "namespace": "default",
-    "pod_name": "myapp-pod",
-    "labels": {"severity": "critical"}
+    "pod": "myapp-pod",
+    "description": "CrashLoopBackOff test"
   }'
 
-# Check the audit log
-curl http://localhost:8000/audit
+# Wait ~30s, then check org-scoped audit log
+curl "http://localhost:8000/audit?org_id=acme-corp"
 ```
+
+### API Documentation & Testing
+
+| Resource | Description |
+|----------|-------------|
+| [docs/API_REFERENCE.md](docs/API_REFERENCE.md) | Full REST API reference |
+| [docs/API_TESTING.md](docs/API_TESTING.md) | Postman & curl testing guide |
+| [postman/](postman/) | Postman collection + local environment |
+| `scripts/test_api_flow.sh` | Automated end-to-end API test |
+
+**Postman quick start:** Import `postman/DevOps-AI-Agent.postman_collection.json` and `postman/DevOps-AI-Agent-Local.postman_environment.json`, then run the **End-to-End Test Flow** folder.
+
+**Key API endpoints:**
+
+| Method | Endpoint | Purpose |
+|--------|----------|---------|
+| `GET` | `/health` | Agent & queue worker status |
+| `GET` | `/audit?org_id=` | Org-scoped incident audit log |
+| `POST` | `/orgs/{org}/docs` | Upload runbooks & policies |
+| `GET` | `/orgs/{org}/docs` | List org documentation |
+| `POST` | `/webhook/manual` | Manually queue an incident |
+| `POST` | `/webhook/alertmanager` | Prometheus alerts |
+| `POST` | `/webhook/github` | GitHub Actions failures |
 
 ### 4. Deploy to Kubernetes
 
@@ -617,18 +642,19 @@ Use the Generic Webhooks integration pointing to `/webhook/pagerduty`
 
 ```bash
 # Run unit tests
-pytest tests/
+pytest tests/ -v
 
-# Test with dummy incidents (no cloud credentials needed)
-python scripts/simulate_incident.py --type k8s
-python scripts/simulate_incident.py --type cicd --platform gitlab
+# API smoke test
+./scripts/test_api_flow.sh
 
-# Test in dry-run mode
-export AUTO_APPLY=false
-# Agent will show proposed actions without executing
+# Simulate incidents (no cloud credentials needed)
+python scripts/simulate_incident.py k8s
+python scripts/simulate_incident.py cicd
+
+# EC2 Docker E2E — see docs/E2E_EC2_DOCKER_TEST.md
 ```
 
-See [CI pipeline](.github/workflows/ci.yml) for automated testing.
+See [docs/API_TESTING.md](docs/API_TESTING.md) and [CI pipeline](.github/workflows/ci.yml).
 
 ---
 
@@ -642,11 +668,13 @@ curl http://localhost:8000/health
 
 ### Audit Log
 
-All agent decisions are logged:
+All agent decisions are stored per organization in cloud storage (or in-memory for dev):
 
 ```bash
-curl http://localhost:8000/audit | jq '.'
+curl "http://localhost:8000/audit?org_id=acme-corp" | jq '.'
 ```
+
+Each entry includes diagnosis, actions taken, grounding validation, escalation status, and duration.
 
 ### Metrics (Optional)
 
@@ -786,17 +814,43 @@ pytest --cov=. tests/
 
 ## Documentation
 
-### Essential Reading
-- **[SECURITY_POLICY.md](SECURITY_POLICY.md)** - **READ FIRST** - Safety rules and blocked operations
-- **[DEVSECOPS_GUIDE.md](DEVSECOPS_GUIDE.md)** - DevSecOps best practices and compliance
-- **[GETTING_STARTED.md](GETTING_STARTED.md)** - Quick start guide (15 minutes)
+### Start here
 
-### Detailed Guides
-- [Multi-Platform Guide](MULTI_PLATFORM_GUIDE.md) - Complete platform configuration
-- [Deployment Guide](DEPLOYMENT.md) - Production deployment for K8s, AWS, GCP, Azure
-- [Architecture](ARCHITECTURE.md) - System design and architecture
-- [Contributing](CONTRIBUTING.md) - How to contribute
-- [Extension Summary](EXTENSION_SUMMARY.md) - Recent changes and features
+| Doc | Description |
+|-----|-------------|
+| [usage-readme.md](usage-readme.md) | Installation, configuration, automated fixes |
+| [docs/GETTING_STARTED.md](docs/GETTING_STARTED.md) | 15-minute quick start |
+| [SECURITY_GUARANTEES.md](SECURITY_GUARANTEES.md) | Safety guarantees — read before production |
+| [SECURITY_POLICY.md](docs/SECURITY_POLICY.md) | Blocked operations and approval workflow |
+
+### API & testing
+
+| Doc | Description |
+|-----|-------------|
+| [docs/API_REFERENCE.md](docs/API_REFERENCE.md) | Full REST API (webhooks, audit, org docs) |
+| [docs/API_TESTING.md](docs/API_TESTING.md) | Postman and curl test procedures |
+| [postman/](postman/) | Postman collection + local environment |
+| `scripts/test_api_flow.sh` | Automated API smoke test |
+
+### Deployment & operations
+
+| Doc | Description |
+|-----|-------------|
+| [docs/CENTRALIZED_DEPLOYMENT.md](docs/CENTRALIZED_DEPLOYMENT.md) | One agent server → remote EC2/K8s/cloud |
+| [docs/E2E_EC2_DOCKER_TEST.md](docs/E2E_EC2_DOCKER_TEST.md) | EC2 + Docker crash-loop end-to-end test |
+| [docs/ESCALATION.md](docs/ESCALATION.md) | Jira, Zoho, email, Slack auto-ticketing |
+| [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) | K8s, AWS ECS, GCP Cloud Run, Azure |
+| [docs/BUILD_AND_USAGE.md](docs/BUILD_AND_USAGE.md) | Python package and Docker image |
+| [docs/ORGANIZATIONAL_GUIDE.md](docs/ORGANIZATIONAL_GUIDE.md) | Enterprise rollout |
+
+### Reference
+
+| Doc | Description |
+|-----|-------------|
+| [docs/PLATFORM_SUPPORT.md](docs/PLATFORM_SUPPORT.md) | CI/CD, cloud, OS support matrix |
+| [docs/MULTI_PLATFORM_GUIDE.md](docs/MULTI_PLATFORM_GUIDE.md) | Multi-platform configuration |
+| [ARCHITECTURE.md](ARCHITECTURE.md) | System design |
+| [docs/README.md](docs/README.md) | Full documentation index |
 
 ---
 
@@ -807,7 +861,7 @@ pytest --cov=. tests/
 1. **Start with `AUTO_APPLY=false`**: Review agent decisions for 1-2 weeks
 2. **Use least-privilege credentials**: Limit IAM/RBAC permissions
 3. **Namespace isolation**: Restrict K8s operations to specific namespaces
-4. **Audit regularly**: Review `/audit` logs weekly
+4. **Audit regularly**: Review `GET /audit?org_id=` logs weekly
 5. **Rotate secrets**: Use short-lived tokens where possible
 
 ### Reporting Security Issues

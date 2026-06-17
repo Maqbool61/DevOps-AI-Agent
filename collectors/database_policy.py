@@ -70,3 +70,50 @@ def get_enabled_database_types(cloud: str) -> List[str]:
     if not is_database_collection_enabled():
         return []
     return sorted(DATABASE_RESOURCE_TYPES.get(cloud, set()))
+
+
+DB_INCIDENT_KEYWORDS = {
+    "rds", "sql", "database", "postgres", "postgresql", "mysql", "mariadb",
+    "redis", "dynamodb", "cosmos", "elasticache", "cloud_sql", "firestore",
+    "memorystore", "db_", "mongodb", "oracle", "sqlite", "cassandra",
+}
+
+
+def is_database_incident(context: dict) -> bool:
+    """Detect if an incident is database-related and likely needs human/DBA escalation."""
+    if not context:
+        return False
+
+    resource_type = (context.get("resource_type") or "").lower()
+    if is_database_resource_type(resource_type):
+        return True
+
+    searchable = " ".join([
+        str(context.get("type", "")),
+        str(context.get("alertname", "")),
+        str(context.get("description", "")),
+        str(context.get("summary", "")),
+        str(context.get("service", "")),
+    ]).lower()
+
+    if any(kw in searchable for kw in DB_INCIDENT_KEYWORDS):
+        return True
+
+    labels = context.get("labels") or {}
+    label_text = " ".join(str(v).lower() for v in labels.values())
+    if any(kw in label_text for kw in DB_INCIDENT_KEYWORDS):
+        return True
+
+    return False
+
+
+def incident_involves_blocked_database(actions: list) -> bool:
+    """True if agent hit a blocked database collector during the run."""
+    for action in actions or []:
+        result = action.get("result") or {}
+        if result.get("blocked") and (
+            "database" in str(result.get("error", "")).lower()
+            or result.get("resource_type") in ALL_DATABASE_RESOURCE_TYPES
+        ):
+            return True
+    return False

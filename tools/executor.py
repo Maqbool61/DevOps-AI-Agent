@@ -32,6 +32,9 @@ ALWAYS_SAFE = [
     "nginx -t",
     "docker ps",
     "docker images",
+    "docker logs",
+    "docker inspect",
+    "docker stats",
 ]
 
 # Commands allowed when AUTO_APPLY=true
@@ -44,6 +47,9 @@ ALLOWED_WITH_AUTO_APPLY = [
     "systemctl reload",
     "nginx -s reload",
     "nginx -s reopen",
+    "docker restart",
+    "docker start",
+    "docker stop",
 ]
 
 # Commands that ALWAYS need human approval
