@@ -7,6 +7,8 @@ from storage.memory_storage import MemoryStorage
 from services.incident_queue import IncidentQueue
 from services.incident_store import IncidentStore
 from services.org_docs import OrgDocs
+from services.org_config import OrgConfig
+from services.org_context import org_credentials
 from agent.grounding import validate_resolution, has_tool_evidence, append_grounding_rules
 
 
@@ -141,3 +143,30 @@ class TestGrounding:
         prompt = append_grounding_rules("You are a DevOps agent.")
         assert "GROUNDING RULES" in prompt
         assert "hallucination" in prompt.lower() or "NEVER" in prompt
+
+
+class TestOrgConfig:
+    def test_save_and_status(self):
+        storage = MemoryStorage()
+        config = OrgConfig(storage=storage)
+        config.save("acme", {
+            "SLACK_WEBHOOK_URL": "https://hooks.slack.com/test",
+            "GITHUB_TOKEN": "ghp_test",
+            "UNKNOWN_KEY": "ignored",
+        })
+        status = config.status("acme")
+        assert status["configured"]["SLACK_WEBHOOK_URL"] is True
+        assert status["configured"]["GITHUB_TOKEN"] is True
+        assert "UNKNOWN_KEY" not in status["configured"]
+
+    def test_org_credentials_overlay(self, monkeypatch):
+        storage = MemoryStorage()
+        config = OrgConfig(storage=storage)
+        config.save("acme", {"GITHUB_TOKEN": "ghp_acme"})
+        monkeypatch.setenv("ORG_ID", "acme")
+        monkeypatch.setenv("GITHUB_TOKEN", "ghp_global")
+
+        with org_credentials("acme", config):
+            assert os.getenv("GITHUB_TOKEN") == "ghp_acme"
+
+        assert os.getenv("GITHUB_TOKEN") == "ghp_global"

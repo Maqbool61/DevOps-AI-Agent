@@ -23,6 +23,8 @@ from services.incident_queue import IncidentQueue
 from services.incident_store import IncidentStore
 from services.org_docs import OrgDocs
 from services.escalation import EscalationService, parse_queue_timestamp
+from services.org_config import OrgConfig
+from services.org_context import org_credentials, refresh_agent_credentials
 from services.pii_scrubber import scrub_dict, scrub_text
 from tools.notify import SlackNotifier
 
@@ -35,6 +37,7 @@ notifier = SlackNotifier()
 incident_queue = IncidentQueue()
 incident_store = IncidentStore()
 org_docs = OrgDocs()
+org_config = OrgConfig()
 escalation_service = EscalationService()
 
 _queue_worker_task: Optional[asyncio.Task] = None
@@ -55,6 +58,15 @@ async def process_incident(entry: dict):
     started_at = parse_queue_timestamp(entry)
 
     log.info("Processing incident", id=incident_id, org_id=org_id)
+
+    with org_credentials(org_id):
+        refresh_agent_credentials(agent)
+        await _process_incident_with_org_creds(entry, incident_id, org_id, context, started_at)
+
+
+async def _process_incident_with_org_creds(
+    entry: dict, incident_id: str, org_id: str, context: dict, started_at
+):
     result = None
 
     try:
@@ -205,6 +217,23 @@ async def get_audit(org_id: Optional[str] = None, limit: int = 50):
 class DocUploadBody(BaseModel):
     path: str
     content: str
+
+
+class OrgConfigBody(BaseModel):
+    credentials: dict
+
+
+@app.put("/orgs/{org_id}/config")
+async def save_org_config(org_id: str, body: OrgConfigBody):
+    """Store org-owned API keys and integrations (BYOK — not platform operator keys)."""
+    result = org_config.save(org_id, body.credentials)
+    return {"status": "saved", **result}
+
+
+@app.get("/orgs/{org_id}/config/status")
+async def org_config_status(org_id: str):
+    """Which credentials are configured for this org (values never returned)."""
+    return org_config.status(org_id)
 
 
 @app.post("/orgs/{org_id}/docs")

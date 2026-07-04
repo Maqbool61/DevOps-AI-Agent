@@ -5,8 +5,17 @@
       "args": ["mcp"],
       "env": {
         "ORG_ID": "your-org",
-        "STORAGE_PROVIDER": "memory",
-        "AUTO_APPLY": "false"
+
+        "ANTHROPIC_API_KEY": "sk-ant-your-key",
+        "SLACK_WEBHOOK_URL": "https://hooks.slack.com/services/YOUR/WEBHOOK",
+        "SLACK_APPROVAL_CHANNEL": "#your-devops-channel",
+        "GITHUB_TOKEN": "ghp_your-token",
+        "GITHUB_ORG": "your-github-org",
+        "KUBECONFIG": "/path/to/your/kubeconfig",
+        "ALLOWED_NAMESPACES": "default,staging",
+        "AUTO_APPLY": "false",
+
+        "STORAGE_PROVIDER": "memory"
       }
     }
   }

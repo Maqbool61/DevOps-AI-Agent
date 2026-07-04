@@ -44,6 +44,7 @@ from tools.fix_suggestions import validate_suggestion
 from collectors.database_policy import check_database_access
 from services.incident_store import IncidentStore
 from services.org_docs import OrgDocs
+from services.org_context import org_credentials, refresh_agent_credentials
 from services.pii_scrubber import scrub_dict, scrub_text, scrub_value
 
 log = structlog.get_logger()
@@ -397,7 +398,7 @@ AGENT_TOOLS = [
 
 class DevOpsAgent:
     def __init__(self):
-        self.client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+        self.client = None
         self.executor = SafeExecutor()
         
         # K8s and existing tools
@@ -442,6 +443,17 @@ class DevOpsAgent:
         self.claude_retry_delay = float(os.getenv("CLAUDE_RETRY_DELAY_SEC", "2"))
         self.model = os.getenv("CLAUDE_MODEL", "claude-sonnet-4-20250514")
 
+    def _anthropic_client(self) -> anthropic.Anthropic:
+        key = os.getenv("ANTHROPIC_API_KEY")
+        if not key:
+            raise RuntimeError(
+                "ANTHROPIC_API_KEY not configured for this org. "
+                "Set it in your MCP env or via configure_org_credentials."
+            )
+        if self.client is None:
+            self.client = anthropic.Anthropic(api_key=key)
+        return self.client
+
     def _org_id(self, context: dict) -> str:
         return context.get("org_id") or os.getenv("ORG_ID", "default")
 
@@ -458,6 +470,23 @@ class DevOpsAgent:
         )
         issue_type = context.get("type", "server")
 
+        with org_credentials(org_id):
+            refresh_agent_credentials(self)
+            self.auto_apply = os.getenv("AUTO_APPLY", "false").lower() == "true"
+            self.model = os.getenv("CLAUDE_MODEL", self.model)
+            return await self._run_with_org_context(
+                context, incident_id, resume, org_id, issue_type
+            )
+
+    async def _run_with_org_context(
+        self,
+        context: dict,
+        incident_id: Optional[str],
+        resume: bool,
+        org_id: str,
+        issue_type: str,
+    ) -> dict:
+        """Agent loop body — runs under org_credentials context."""
         log.info(
             "Agent starting",
             type=issue_type,
@@ -608,7 +637,7 @@ class DevOpsAgent:
         last_error = None
         for attempt in range(1, self.claude_retries + 1):
             try:
-                return self.client.messages.create(
+                return self._anthropic_client().messages.create(
                     model=self.model,
                     max_tokens=4096,
                     system=system_prompt,
@@ -731,7 +760,12 @@ class DevOpsAgent:
         self, name: str, inputs: dict, context: Optional[dict] = None
     ) -> dict:
         """Public entry point for tool execution (used by MCP and external agents)."""
-        return await self._execute_tool(name, inputs, context or {})
+        ctx = context or {}
+        org_id = ctx.get("org_id") or os.getenv("ORG_ID", "default")
+        with org_credentials(org_id):
+            refresh_agent_credentials(self)
+            self.auto_apply = os.getenv("AUTO_APPLY", "false").lower() == "true"
+            return await self._execute_tool(name, inputs, ctx)
 
     async def _execute_tool(self, name: str, inputs: dict, context: dict) -> dict:
         """Route tool calls to the appropriate handler."""
