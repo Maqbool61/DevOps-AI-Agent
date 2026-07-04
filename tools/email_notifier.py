@@ -247,6 +247,47 @@ View full details: https://agent-dashboard.company.com/incidents/{incident_id}
 """
         
         return self._send_email(subject, body, is_html=False, priority='urgent')
+
+    def send_escalation_ticket(
+        self,
+        incident_id: str,
+        org_id: str,
+        summary: str,
+        reasons: List[str],
+        description: str,
+        priority: str = "high",
+    ) -> bool:
+        """Send escalation email when agent cannot resolve — creates a human ticket."""
+        if not self.enabled:
+            logger.info(f"Email disabled - would have escalated {incident_id}")
+            return False
+
+        reason_text = "\n".join(f"  - {r}" for r in reasons)
+        subject = f"[DevOps Agent] ESCALATION — {summary[:120]}"
+        body = f"""
+INCIDENT ESCALATION — Human action required
+==========================================
+
+{summary}
+
+Incident ID: {incident_id}
+Organization: {org_id}
+Priority: {priority.upper()}
+Time: {datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')}
+
+Escalation reasons:
+{reason_text}
+
+DETAILS:
+{description}
+
+This incident was automatically escalated because the AI agent could not
+resolve it within the configured time limit, encountered a database issue,
+or lacked sufficient evidence to act safely.
+
+Please investigate and update the team when resolved.
+"""
+        return self._send_email(subject, body, is_html=False, priority='urgent' if priority == 'critical' else 'high')
     
     def _build_dangerous_operation_email(
         self,

@@ -94,28 +94,73 @@ class TestAgentLoop:
         from agent.core import DevOpsAgent
         import os
 
-        # Set dummy API key for test
         os.environ['ANTHROPIC_API_KEY'] = 'sk-ant-test-dummy-key-for-testing'
 
         with patch("anthropic.Anthropic") as mock_anthropic:
             mock_client = MagicMock()
             mock_anthropic.return_value = mock_client
 
-            # Simulate Claude returning end_turn immediately
-            mock_response = MagicMock()
-            mock_response.stop_reason = "end_turn"
-            mock_response.content = [MagicMock(type="text", text="OOM detected. Increased memory limits to 512Mi.")]
-            mock_client.messages.create.return_value = mock_response
+            # Step 1: Claude requests tool
+            tool_block = MagicMock()
+            tool_block.type = "tool_use"
+            tool_block.name = "get_k8s_context"
+            tool_block.id = "tool_1"
+            tool_block.input = {"namespace": "production"}
+
+            mock_tool_response = MagicMock()
+            mock_tool_response.stop_reason = "tool_use"
+            mock_tool_response.content = [tool_block]
+
+            # Step 2: Claude suggests non-destructive fix
+            suggest_block = MagicMock()
+            suggest_block.type = "tool_use"
+            suggest_block.name = "suggest_fix"
+            suggest_block.id = "tool_2"
+            suggest_block.input = {
+                "title": "Increase memory limits",
+                "description": "Evidence: OOMKilled on api-pod",
+                "commands": ["kubectl set resources deployment/api -n production --limits=memory=512Mi"],
+                "verification_steps": ["kubectl get pods -n production"],
+            }
+
+            mock_suggest_response = MagicMock()
+            mock_suggest_response.stop_reason = "tool_use"
+            mock_suggest_response.content = [suggest_block]
+
+            # Step 3: Claude concludes with evidence
+            mock_end_response = MagicMock()
+            mock_end_response.stop_reason = "end_turn"
+            mock_end_response.content = [
+                MagicMock(
+                    type="text",
+                    text="Evidence: get_k8s_context showed OOMKilled on api-pod.\nOOM detected. Suggested memory increase to 512Mi via suggest_fix.",
+                )
+            ]
+
+            mock_client.messages.create.side_effect = [
+                mock_tool_response, mock_suggest_response, mock_end_response,
+            ]
 
             agent = DevOpsAgent()
-            agent.k8s_collector.collect = AsyncMock(return_value={"pods": []})
+            agent.k8s_collector.collect = AsyncMock(return_value={"pods": [{"name": "api-pod", "reason": "OOMKilled"}]})
             agent.notifier.send_resolution = AsyncMock()
+            agent.notifier.send_fix_suggestion = AsyncMock()
+            agent.incident_store = __import__("services.incident_store", fromlist=["IncidentStore"]).IncidentStore(
+                __import__("storage.memory_storage", fromlist=["MemoryStorage"]).MemoryStorage()
+            )
+            agent.org_docs = __import__("services.org_docs", fromlist=["OrgDocs"]).OrgDocs(
+                __import__("storage.memory_storage", fromlist=["MemoryStorage"]).MemoryStorage()
+            )
 
             result = await agent.run({
                 "type": "k8s",
                 "namespace": "production",
                 "pod": "api-pod",
-            })
+                "org_id": "test-org",
+            }, incident_id="INC-TEST-001", resume=False)
 
             assert result["resolved"] is True
             assert "OOM" in result["diagnosis"]
+            assert result["grounding"]["grounded"] is True
+            assert len(result["suggested_fixes"]) == 1
+            assert result["suggestions_only"] is True

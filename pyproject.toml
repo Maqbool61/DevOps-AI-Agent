@@ -1,0 +1,125 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "devops-ai-agent"
+version = "1.0.0"
+description = "Autonomous AI-powered DevOps agent for SRE, Kubernetes, cloud, and CI/CD incident response"
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.9"
+authors = [{ name = "DevOps AI Agent Contributors" }]
+keywords = ["devops", "sre", "kubernetes", "ai", "incident-response", "automation"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Intended Audience :: System Administrators",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: System :: Monitoring",
+    "Topic :: System :: Systems Administration",
+]
+dependencies = [
+    "anthropic>=0.40.0",
+    "fastapi>=0.111.0",
+    "uvicorn[standard]>=0.30.0",
+    "httpx>=0.27.0",
+    "python-dotenv>=1.0.1",
+    "pydantic>=2.7.0",
+    "pydantic-settings>=2.3.0",
+    "structlog>=24.2.0",
+    "kubernetes>=30.1.0",
+    "slack-sdk>=3.29.0",
+    "PyGithub>=2.3.0",
+    "prometheus-client>=0.20.0",
+    "python-multipart>=0.0.9",
+    "mcp[cli]>=1.9.0",
+]
+
+[project.optional-dependencies]
+storage = [
+    "boto3>=1.34.0",
+    "google-cloud-storage>=2.14.0",
+    "azure-storage-blob>=12.19.0",
+    "azure-identity>=1.15.0",
+]
+aws = ["boto3>=1.34.0", "botocore>=1.34.0"]
+gcp = [
+    "google-cloud-compute>=1.16.0",
+    "google-cloud-container>=2.43.0",
+    "google-cloud-run>=0.10.0",
+    "google-cloud-functions>=1.16.0",
+    "google-cloud-logging>=3.9.0",
+    "google-cloud-storage>=2.14.0",
+    "google-cloud-pubsub>=2.19.0",
+]
+azure = [
+    "azure-identity>=1.15.0",
+    "azure-mgmt-compute>=30.6.0",
+    "azure-mgmt-containerservice>=29.0.0",
+    "azure-mgmt-containerinstance>=10.1.0",
+    "azure-mgmt-appcontainers>=3.0.0",
+    "azure-mgmt-containerregistry>=10.3.0",
+    "azure-mgmt-web>=7.2.0",
+    "azure-mgmt-monitor>=6.0.2",
+    "azure-mgmt-network>=25.0.0",
+    "azure-mgmt-storage>=21.0.0",
+    "azure-mgmt-servicebus>=8.0.0",
+    "azure-mgmt-batch>=17.0.0",
+]
+cloud = [
+    "boto3>=1.34.0",
+    "botocore>=1.34.0",
+    "google-cloud-compute>=1.16.0",
+    "google-cloud-container>=2.43.0",
+    "google-cloud-run>=0.10.0",
+    "google-cloud-functions>=1.16.0",
+    "google-cloud-logging>=3.9.0",
+    "google-cloud-storage>=2.14.0",
+    "google-cloud-pubsub>=2.19.0",
+    "azure-identity>=1.15.0",
+    "azure-mgmt-compute>=30.6.0",
+    "azure-mgmt-containerservice>=29.0.0",
+    "azure-mgmt-containerinstance>=10.1.0",
+    "azure-mgmt-appcontainers>=3.0.0",
+    "azure-mgmt-containerregistry>=10.3.0",
+    "azure-mgmt-web>=7.2.0",
+    "azure-mgmt-monitor>=6.0.2",
+    "azure-mgmt-network>=25.0.0",
+    "azure-mgmt-storage>=21.0.0",
+    "azure-mgmt-servicebus>=8.0.0",
+    "azure-mgmt-batch>=17.0.0",
+]
+dev = [
+    "pytest>=8.2.0",
+    "pytest-asyncio>=0.23.0",
+    "pytest-mock>=3.14.0",
+    "black>=24.0.0",
+    "flake8>=7.0.0",
+    "bandit>=1.7.0",
+    "safety>=3.0.0",
+]
+
+[project.scripts]
+devops-agent = "devops_agent.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/yourusername/devops-ai-agent"
+Documentation = "https://github.com/yourusername/devops-ai-agent#readme"
+Repository = "https://github.com/yourusername/devops-ai-agent"
+Issues = "https://github.com/yourusername/devops-ai-agent/issues"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["agent*", "api*", "collectors*", "tools*", "devops_agent*", "devops_mcp*", "storage*", "services*"]
+exclude = ["tests*", "scripts*", "k8s*", "docker*", "docs*"]
+
+[tool.setuptools.package-data]
+"*" = ["py.typed"]
