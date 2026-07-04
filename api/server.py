@@ -107,7 +107,7 @@ async def process_incident(entry: dict):
             escalation_outcome = await escalation_service.escalate(decision, incident_id, org_id)
 
         incident_queue.mark_failed(org_id, incident_id, str(e))
-        await notifier.send_error(incident_id, scrub_text(str(e))
+        await notifier.send_error(incident_id, scrub_text(str(e)))
 
         incident_store.save_audit(org_id, incident_id, scrub_dict({
             "id": incident_id,

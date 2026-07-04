@@ -32,6 +32,13 @@ def cmd_serve(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_mcp(args: argparse.Namespace) -> int:
+    from devops_mcp.server import run_mcp
+
+    run_mcp(transport=args.transport, host=args.host, port=args.port)
+    return 0
+
+
 def cmd_version(_args: argparse.Namespace) -> int:
     from devops_agent import __version__
 
@@ -52,6 +59,17 @@ def main() -> None:
     serve.add_argument("--workers", type=int, default=None, help="Uvicorn workers (default: 2)")
     serve.add_argument("--reload", action="store_true", help="Dev mode: auto-reload on code changes")
     serve.set_defaults(func=cmd_serve)
+
+    mcp = sub.add_parser("mcp", help="Start MCP server (stdio by default — for Cursor, Claude Desktop, etc.)")
+    mcp.add_argument(
+        "--transport",
+        choices=["stdio", "sse", "streamable-http"],
+        default="stdio",
+        help="MCP transport (default: stdio)",
+    )
+    mcp.add_argument("--host", default="127.0.0.1", help="Bind host for HTTP transports")
+    mcp.add_argument("--port", type=int, default=8090, help="Bind port for HTTP transports")
+    mcp.set_defaults(func=cmd_mcp)
 
     ver = sub.add_parser("version", help="Print package version")
     ver.set_defaults(func=cmd_version)

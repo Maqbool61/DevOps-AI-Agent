@@ -40,6 +40,7 @@ dependencies = [
     "PyGithub>=2.3.0",
     "prometheus-client>=0.20.0",
     "python-multipart>=0.0.9",
+    "mcp[cli]>=1.9.0",
 ]
 
 [project.optional-dependencies]
@@ -117,7 +118,7 @@ Issues = "https://github.com/yourusername/devops-ai-agent/issues"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["agent*", "api*", "collectors*", "tools*", "devops_agent*", "storage*", "services*"]
+include = ["agent*", "api*", "collectors*", "tools*", "devops_agent*", "devops_mcp*", "storage*", "services*"]
 exclude = ["tests*", "scripts*", "k8s*", "docker*", "docs*"]
 
 [tool.setuptools.package-data]

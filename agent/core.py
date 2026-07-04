@@ -727,6 +727,12 @@ class DevOpsAgent:
 
         return enriched
 
+    async def execute_tool(
+        self, name: str, inputs: dict, context: Optional[dict] = None
+    ) -> dict:
+        """Public entry point for tool execution (used by MCP and external agents)."""
+        return await self._execute_tool(name, inputs, context or {})
+
     async def _execute_tool(self, name: str, inputs: dict, context: dict) -> dict:
         """Route tool calls to the appropriate handler."""
         try:

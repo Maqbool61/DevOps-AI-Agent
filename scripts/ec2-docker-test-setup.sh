@@ -5,21 +5,41 @@ set -euo pipefail
 
 echo "=== DevOps Agent E2E Test — Docker crash-loop setup ==="
 
-# Install Docker (Amazon Linux 2023 / Ubuntu)
-if command -v apt-get &>/dev/null; then
+# Install Docker only if not already available (avoids containerd.io vs containerd conflicts)
+if command -v docker &>/dev/null && docker info &>/dev/null 2>&1; then
+  echo "Docker already installed — skipping package install"
+  docker --version
+elif command -v apt-get &>/dev/null; then
   sudo apt-get update -qq
-  sudo apt-get install -y docker.io docker-compose-plugin
+  if dpkg -l docker-ce 2>/dev/null | grep -q ^ii; then
+    echo "Docker CE detected — ensuring service is running"
+  else
+    sudo apt-get install -y docker.io docker-compose-plugin || {
+      echo "apt install failed — if docker works, re-run after: docker --version"
+      exit 1
+    }
+  fi
   sudo systemctl enable docker
   sudo systemctl start docker
-  sudo usermod -aG docker "$USER" 2>/dev/null || true
+  sudo usermod -aG docker "${SUDO_USER:-$USER}" 2>/dev/null || true
 elif command -v yum &>/dev/null || command -v dnf &>/dev/null; then
   sudo yum update -y -q || sudo dnf update -y -q
   sudo yum install -y docker || sudo dnf install -y docker
   sudo systemctl enable docker
   sudo systemctl start docker
-  sudo usermod -aG docker "$USER" 2>/dev/null || true
+  sudo usermod -aG docker "${SUDO_USER:-$USER}" 2>/dev/null || true
 else
   echo "Unsupported OS — install Docker manually"
+  exit 1
+fi
+
+# Prefer docker compose plugin; fall back to docker-compose
+if docker compose version &>/dev/null 2>&1; then
+  COMPOSE="docker compose"
+elif command -v docker-compose &>/dev/null; then
+  COMPOSE="docker-compose"
+else
+  echo "ERROR: neither 'docker compose' nor 'docker-compose' found"
   exit 1
 fi
 
@@ -44,8 +64,8 @@ services:
 EOF
 
 echo "Building and starting broken container..."
-sudo docker compose build -q
-sudo docker compose up -d
+sudo $COMPOSE build -q
+sudo $COMPOSE up -d
 
 sleep 5
 echo ""

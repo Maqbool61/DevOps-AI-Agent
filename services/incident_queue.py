@@ -102,7 +102,7 @@ class IncidentQueue:
         self._delete_processing(org_id, incident_id)
 
     def list_pending_org_ids(self) -> List[str]:
-        """Scan all orgs with pending or processing items."""
+        """Orgs to poll: env config plus any org with pending/processing queue items."""
         orgs = set()
         org_id = os.getenv("ORG_ID", "default")
         orgs.add(org_id)
@@ -111,6 +111,13 @@ class IncidentQueue:
             o = o.strip()
             if o:
                 orgs.add(o)
+
+        # Discover orgs from queue keys (e.g. webhook X-Org-ID differs from ORG_ID)
+        for key in self.storage.list_keys(""):
+            parts = key.split("/")
+            if len(parts) >= 4 and parts[1] == "queue" and parts[2] in (QUEUE_PENDING, QUEUE_PROCESSING):
+                orgs.add(parts[0])
+
         return list(orgs)
 
     def _get_processing(self, org_id: str, incident_id: str) -> Optional[dict]:
