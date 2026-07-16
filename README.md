@@ -26,6 +26,8 @@ This agent is your **24/7 on-call teammate** that handles:
 - **Grounded AI**: Requires tool evidence before claiming fixes — reduces hallucination
 - **Auto-escalation**: Creates Jira/Zoho tickets + Slack/email when the agent cannot resolve
 - **Centralized or co-located**: One agent server can fix remote EC2/K8s/cloud via SSH and APIs
+- **MCP server**: Expose DevOps tools to any MCP client (Cursor, Claude Desktop, custom agents)
+- **Bring your own keys (BYOK)**: Each org uses their own Anthropic, Slack, GitHub, and cloud credentials
 - **Plugin Architecture**: Easy to extend with custom collectors and tools
 
 ---
@@ -57,9 +59,17 @@ This agent is your **24/7 on-call teammate** that handles:
        │
        ▼
  Remote targets: EC2 (SSH) · EKS/GKE/AKS (API) · AWS/GCP/Azure (API)
+
+┌──────────────────────────────────────────────────────────────────┐
+│  MCP Server (devops-agent mcp) — any AI agent can connect        │
+│  Cursor · Claude Desktop · SDK agents · custom bots              │
+│  Tools: kubectl, GitHub logs, ArgoCD, Helm, cloud, queue, audit  │
+└──────────────────────────────────────────────────────────────────┘
 ```
 
 **Processing model:** Webhooks return `status: queued` immediately. A background worker processes incidents, saves checkpoints (resume after crash), and writes audit/logs to org-scoped cloud storage.
+
+**MCP model:** Orgs connect their own AI agent to `devops-agent mcp` and call DevOps tools directly — or queue incidents / run full diagnosis. Each org supplies their own API keys (see [MCP & BYOK](#mcp-server--bring-your-own-keys) below).
 
 ---
 
@@ -157,6 +167,7 @@ The agent handles routine tasks so your team focuses on complex problems:
 |-------------|---|
 | [Getting Started](docs/GETTING_STARTED.md) | 15-minute setup |
 | [API Reference](docs/API_REFERENCE.md) | Webhooks, audit, org docs |
+| [MCP & BYOK](#mcp-server--bring-your-own-keys) | Connect any AI agent; org-owned credentials |
 | [Centralized Deployment](docs/CENTRALIZED_DEPLOYMENT.md) | One agent → many servers |
 | [E2E EC2 Docker Test](docs/E2E_EC2_DOCKER_TEST.md) | Full crash-loop test |
 
@@ -240,6 +251,101 @@ Monitoring → Alert → Agent → Auto-fix → Verify → Document
 - **Team-Based**: Separate agents per team/service
 
 **Read [docs/ORGANIZATIONAL_GUIDE.md](docs/ORGANIZATIONAL_GUIDE.md) for complete deployment guide.**
+
+---
+
+## MCP Server & Bring Your Own Keys
+
+Use the DevOps toolkit from **any MCP-compatible AI agent** — not only the built-in Claude loop. Each organization keeps **their own** Anthropic, Slack, GitHub, kube, and cloud credentials.
+
+### How it works
+
+```
+Org's AI agent (Cursor, Claude Desktop, custom bot)
+        │  MCP (stdio or HTTP)
+        ▼
+devops-agent mcp
+        │  org-scoped credentials
+        ▼
+Their Slack · Their GitHub · Their K8s · Their cloud
+```
+
+| Who | What they provide |
+|-----|-------------------|
+| **Each org** | Anthropic, Slack, GitHub, kube, cloud keys; their AI agent |
+| **Platform operator** | Shared storage/queue only (`STORAGE_*`, `QUEUE_*`) — not org secrets |
+
+### Start the MCP server
+
+```bash
+pip install -r requirements.txt
+
+# stdio — for Cursor / Claude Desktop (default)
+devops-agent mcp
+
+# HTTP — for remote clients
+devops-agent mcp --transport streamable-http --port 8090
+```
+
+### Connect from Cursor (or any MCP client)
+
+Copy [mcp-config.example.json](mcp-config.example.json) into your MCP settings. **Each org fills in their own keys:**
+
+```json
+{
+  "mcpServers": {
+    "devops-ai-agent": {
+      "command": "devops-agent",
+      "args": ["mcp"],
+      "env": {
+        "ORG_ID": "acme-corp",
+        "ANTHROPIC_API_KEY": "sk-ant-...",
+        "SLACK_WEBHOOK_URL": "https://hooks.slack.com/services/...",
+        "GITHUB_TOKEN": "ghp_...",
+        "KUBECONFIG": "/path/to/kubeconfig",
+        "AUTO_APPLY": "false"
+      }
+    }
+  }
+}
+```
+
+Alerts and notifications go to **their** Slack. API calls use **their** tokens. You do not need to host org secrets on the platform.
+
+### MCP tools (32 total)
+
+**DevOps actions** (same as the built-in agent): `get_k8s_context`, `run_kubectl`, `get_github_logs`, `sync_argocd_app`, `helm_rollback`, `get_cloud_resource`, and more.
+
+**Platform APIs:**
+
+| Tool | Purpose |
+|------|---------|
+| `configure_org_credentials` | Store org keys (for shared webhook/API deployments) |
+| `get_org_config_status` | Check which keys are set (values never returned) |
+| `enqueue_incident` | Queue an incident for the background worker |
+| `diagnose_incident` | Run the full Claude agent loop with the org's Anthropic key |
+| `get_incident_audit` | Fetch org-scoped audit history |
+| `list_org_docs` / `get_org_doc` | Read runbooks and policies |
+
+### Register credentials via API (multi-tenant webhook server)
+
+When multiple orgs share one webhook/API server, each org registers their own keys:
+
+```bash
+curl -X PUT http://localhost:8000/orgs/acme-corp/config \
+  -H "Content-Type: application/json" \
+  -d '{
+    "credentials": {
+      "ANTHROPIC_API_KEY": "sk-ant-...",
+      "SLACK_WEBHOOK_URL": "https://hooks.slack.com/...",
+      "GITHUB_TOKEN": "ghp_..."
+    }
+  }'
+
+curl http://localhost:8000/orgs/acme-corp/config/status
+```
+
+Credentials are stored at `{org_id}/config/credentials.json` in org-scoped storage and applied per request — org A never uses org B's keys.
 
 ### Fix Verification
 
@@ -454,10 +560,10 @@ cp .env.example .env
 nano .env
 ```
 
-**Minimum required variables:**
+**Minimum required variables** (for webhook server — each org can also supply keys via MCP env or `PUT /orgs/{org}/config`):
 
 ```bash
-# AI Provider
+# AI Provider (required for built-in agent loop / diagnose_incident)
 ANTHROPIC_API_KEY=your-claude-api-key
 
 # Email Alerts (CRITICAL - for dangerous operation notifications)
@@ -490,8 +596,12 @@ See [.env.example](.env.example) for all configuration options.
 ### 3. Run Locally
 
 ```bash
-# Start the agent API server
-uvicorn api.server:app --reload --port 8000
+# Webhook API + background queue worker
+devops-agent serve
+# or: uvicorn api.server:app --reload --port 8000
+
+# MCP server (for Cursor / Claude Desktop / custom agents)
+devops-agent mcp
 
 # In another terminal, test with a manual incident (queued — async processing)
 curl -X POST http://localhost:8000/webhook/manual \
@@ -525,6 +635,8 @@ curl "http://localhost:8000/audit?org_id=acme-corp"
 |--------|----------|---------|
 | `GET` | `/health` | Agent & queue worker status |
 | `GET` | `/audit?org_id=` | Org-scoped incident audit log |
+| `PUT` | `/orgs/{org}/config` | Store org-owned API keys (BYOK) |
+| `GET` | `/orgs/{org}/config/status` | Which credentials are configured |
 | `POST` | `/orgs/{org}/docs` | Upload runbooks & policies |
 | `GET` | `/orgs/{org}/docs` | List org documentation |
 | `POST` | `/webhook/manual` | Manually queue an incident |
@@ -828,6 +940,7 @@ pytest --cov=. tests/
 | Doc | Description |
 |-----|-------------|
 | [docs/API_REFERENCE.md](docs/API_REFERENCE.md) | Full REST API (webhooks, audit, org docs) |
+| [mcp-config.example.json](mcp-config.example.json) | Cursor / MCP client config (BYOK) |
 | [docs/API_TESTING.md](docs/API_TESTING.md) | Postman and curl test procedures |
 | [postman/](postman/) | Postman collection + local environment |
 | `scripts/test_api_flow.sh` | Automated API smoke test |
@@ -896,6 +1009,8 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## Roadmap
 
+- [x] MCP server for external AI agents
+- [x] Per-org credentials (BYOK)
 - [ ] More CI/CD platforms (CircleCI, TeamCity, Drone CI)
 - [ ] Database diagnostics (PostgreSQL, MySQL, MongoDB)
 - [ ] Cost optimization recommendations

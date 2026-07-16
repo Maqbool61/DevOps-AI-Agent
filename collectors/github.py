@@ -16,11 +16,18 @@ log = structlog.get_logger()
 class GitHubCollector:
     def __init__(self):
         self.token = os.getenv("GITHUB_TOKEN", "")
-        self.headers = {
-            "Authorization": f"Bearer {self.token}",
+        self.headers = self._build_headers()
+
+    def _build_headers(self) -> dict:
+        return {
+            "Authorization": f"Bearer {os.getenv('GITHUB_TOKEN', '')}",
             "Accept": "application/vnd.github+json",
             "X-GitHub-Api-Version": "2022-11-28",
         }
+
+    def refresh_credentials(self) -> None:
+        self.token = os.getenv("GITHUB_TOKEN", "")
+        self.headers = self._build_headers()
         self.base = "https://api.github.com"
 
     async def collect(self, repo: str, run_id: int) -> dict:

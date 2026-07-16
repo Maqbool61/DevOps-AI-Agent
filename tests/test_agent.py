@@ -25,7 +25,9 @@ class TestSafeExecutor:
 
     def test_classifies_restart_as_allowed(self):
         assert self.executor._classify("kubectl rollout restart deployment/api") == "allowed"
-        assert self.executor._classify("kubectl scale deployment/api --replicas=3") == "allowed"
+
+    def test_classifies_scale_as_requires_approval_by_default(self):
+        assert self.executor._classify("kubectl scale deployment/api --replicas=3") == "requires_approval"
         assert self.executor._classify("systemctl restart nginx") == "allowed"
 
     def test_classifies_delete_as_requires_approval(self):
