@@ -2,7 +2,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
-[![CI](https://github.com/yourusername/devops-ai-agent/workflows/CI/badge.svg)](https://github.com/okirigabriel/devops-ai-agent/actions)
+[![CI](https://github.com/okirigabriel/devops-ai-agent/workflows/CI/badge.svg)](https://github.com/okirigabriel/devops-ai-agent/actions)
 
 An autonomous **AI-powered DevOps agent** that monitors, diagnoses, and fixes incidents across your entire infrastructure stack — automatically. Built for **SRE teams** who want to reduce toil and improve MTTR (Mean Time To Recovery).
 
