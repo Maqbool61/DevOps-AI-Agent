@@ -2,6 +2,7 @@
 Safe Command Executor
 Enforces command whitelists and human approval gates before running anything.
 """
+
 import asyncio
 import base64
 import os
@@ -17,6 +18,27 @@ from tools.safety import (
 from tools.ssh_utils import build_ssh_command
 
 log = structlog.get_logger()
+
+
+def _build_ssh_args(host: str, command: str) -> list:
+    """Build SSH argv for remote command execution.
+
+    Defaults to OpenSSH's strict host-key checking (no StrictHostKeyChecking=no).
+    Use SSH_KNOWN_HOSTS to point to a known_hosts file, and SSH_REMOTE_USER
+    when the host is given without a user@ prefix.
+    """
+    ssh_args = ["ssh"]
+    known_hosts = os.getenv("SSH_KNOWN_HOSTS")
+    if known_hosts:
+        ssh_args.extend(["-o", f"UserKnownHostsFile={known_hosts}"])
+    remote_host = host
+    if "@" not in remote_host:
+        remote_user = os.getenv("SSH_REMOTE_USER")
+        if remote_user:
+            remote_host = f"{remote_user}@{remote_host}"
+    ssh_args.extend([remote_host, command])
+    return ssh_args
+
 
 # Commands that can always auto-run (read-only or safe restarts)
 ALWAYS_SAFE = [
@@ -159,6 +181,10 @@ class SafeExecutor:
                 "command": command,
             }
         except asyncio.TimeoutError:
-            return {"success": False, "error": "Command timed out after 60s", "command": command}
+            return {
+                "success": False,
+                "error": "Command timed out after 60s",
+                "command": command,
+            }
         except Exception as e:
             return {"success": False, "error": str(e), "command": command}
