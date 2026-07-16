@@ -20,6 +20,7 @@ from agent.core import AGENT_TOOLS, DevOpsAgent
 from devops_mcp.registry import register_agent_tools, register_platform_tools, register_resources
 from services.incident_queue import IncidentQueue
 from services.incident_store import IncidentStore
+from services.org_config import OrgConfig
 from services.org_docs import OrgDocs
 
 load_dotenv()
@@ -28,12 +29,15 @@ log = structlog.get_logger()
 INSTRUCTIONS = """\
 DevOps AI Agent MCP — infrastructure incident response for any AI agent.
 
+**Bring your own keys (BYOK):** Each org uses their own Anthropic, Slack, GitHub,
+kube, and cloud credentials — configure them in your MCP env block or via
+configure_org_credentials. The platform operator should not supply org secrets.
+
 Use individual tools (get_k8s_context, get_github_logs, run_kubectl, etc.) to gather
 context and apply safe remediations. Use enqueue_incident to queue work for the
-background worker, or diagnose_incident to run the full built-in Claude agent loop.
+background worker, or diagnose_incident to run the full Claude agent loop with your org's API key.
 
-Org runbooks live under list_org_docs / get_org_doc. Audit history: get_incident_audit.
-All destructive actions respect AUTO_APPLY and approval settings from the server env.
+Org runbooks: list_org_docs / get_org_doc. Audit history: get_incident_audit.
 """
 
 
@@ -47,14 +51,15 @@ def create_mcp_server() -> FastMCP:
     incident_queue = IncidentQueue()
     incident_store = IncidentStore()
     org_docs = OrgDocs()
+    org_config = OrgConfig()
 
     register_agent_tools(mcp, agent)
-    register_platform_tools(mcp, agent, incident_queue, incident_store, org_docs)
+    register_platform_tools(mcp, agent, incident_queue, incident_store, org_docs, org_config)
     register_resources(mcp, incident_store, org_docs)
 
     log.info(
         "DevOps MCP server initialized",
-        tools=len(AGENT_TOOLS) + 6,
+        tools=len(AGENT_TOOLS) + 8,
         org_id=os.getenv("ORG_ID", "default"),
     )
     return mcp

@@ -408,7 +408,7 @@ jobs:
           test -f .env.example && echo "✓ .env.example exists"
           test -f requirements.txt && echo "✓ requirements.txt exists"
           test -f CONTRIBUTING.md && echo "✓ CONTRIBUTING.md exists"
-          test -f MULTI_PLATFORM_GUIDE.md && echo "✓ MULTI_PLATFORM_GUIDE.md exists"
+          test -f docs/MULTI_PLATFORM_GUIDE.md && echo "✓ docs/MULTI_PLATFORM_GUIDE.md exists"
 
       - name: Check Python Documentation
         run: |
