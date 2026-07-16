@@ -16,6 +16,12 @@ class K8sCollector:
         self._apps_client = None
         self._loaded = False
 
+    def reset(self) -> None:
+        """Clear cached clients so the next call picks up org-specific KUBECONFIG."""
+        self._client = None
+        self._apps_client = None
+        self._loaded = False
+
     def _load(self):
         if self._loaded:
             return

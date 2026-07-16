@@ -9,6 +9,13 @@ from typing import Optional
 
 import structlog
 
+from tools.safety import (
+    emergency_stop_block,
+    is_emergency_stop_active,
+    requires_configured_approval,
+)
+from tools.ssh_utils import build_ssh_command
+
 log = structlog.get_logger()
 
 # Commands that can always auto-run (read-only or safe restarts)
@@ -75,6 +82,9 @@ class SafeExecutor:
         """Returns 'safe', 'allowed', 'requires_approval', or 'blocked'."""
         cmd = command.strip().lower()
 
+        if requires_configured_approval(command):
+            return "requires_approval"
+
         for blocked in ALWAYS_REQUIRE_APPROVAL:
             if blocked in cmd:
                 return "requires_approval"
@@ -91,11 +101,18 @@ class SafeExecutor:
 
     async def run(self, command: str, host: Optional[str] = None) -> dict:
         """Run a command, bypassing safety for internal approved calls."""
+        if is_emergency_stop_active():
+            return emergency_stop_block(
+                "Agent emergency stop is active. Approved actions cannot run."
+            )
         return await self._exec(command, host)
 
     async def run_safe(self, command: str, host: Optional[str] = None) -> dict:
         """Run with full safety checks."""
         classification = self._classify(command)
+
+        if is_emergency_stop_active() and classification != "safe":
+            return emergency_stop_block()
 
         if classification == "requires_approval":
             if not self.auto_apply:
@@ -123,8 +140,7 @@ class SafeExecutor:
     async def _exec(self, command: str, host: Optional[str] = None) -> dict:
         """Execute the command."""
         if host and host not in ("localhost", "127.0.0.1", ""):
-            # SSH to remote host
-            command = f"ssh -o StrictHostKeyChecking=no {host} '{command}'"
+            command = build_ssh_command(host, command)
 
         log.info("Executing command", command=command)
 

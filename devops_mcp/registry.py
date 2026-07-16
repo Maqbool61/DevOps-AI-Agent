@@ -12,6 +12,7 @@ from mcp.server.fastmcp import FastMCP
 from agent.core import AGENT_TOOLS, DevOpsAgent
 from services.incident_queue import IncidentQueue
 from services.incident_store import IncidentStore
+from services.org_config import OrgConfig
 from services.org_docs import OrgDocs
 
 load_dotenv()
@@ -91,8 +92,32 @@ def register_platform_tools(
     incident_queue: IncidentQueue,
     incident_store: IncidentStore,
     org_docs: OrgDocs,
+    org_config: OrgConfig,
 ) -> None:
     """Incident queue, audit, org docs, and full agent diagnosis for MCP clients."""
+
+    @mcp.tool(
+        name="configure_org_credentials",
+        description=(
+            "Store this org's own API keys and integrations (Anthropic, Slack, GitHub, kube, cloud). "
+            "Each org brings their own credentials — not the platform operator's."
+        ),
+    )
+    async def configure_org_credentials(
+        credentials: dict,
+        org_id: str = "",
+    ) -> dict:
+        org = org_id or os.getenv("ORG_ID", "default")
+        result = org_config.save(org, credentials)
+        return {"status": "saved", **result}
+
+    @mcp.tool(
+        name="get_org_config_status",
+        description="Check which credentials are configured for an org (values are never returned).",
+    )
+    async def get_org_config_status(org_id: str = "") -> dict:
+        org = org_id or os.getenv("ORG_ID", "default")
+        return org_config.status(org)
 
     @mcp.tool(name="enqueue_incident", description="Queue an incident for background processing by the DevOps agent worker.")
     async def enqueue_incident(

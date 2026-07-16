@@ -20,10 +20,14 @@ SEVERITY_EMOJI = {
 
 
 class SlackNotifier:
-    def __init__(self):
-        self.webhook_url = os.getenv("SLACK_WEBHOOK_URL", "")
-        self.approval_channel = os.getenv("SLACK_APPROVAL_CHANNEL", "#devops")
-        self.bot_token = os.getenv("SLACK_BOT_TOKEN", "")
+    def _webhook_url(self) -> str:
+        return os.getenv("SLACK_WEBHOOK_URL", "")
+
+    def _approval_channel(self) -> str:
+        return os.getenv("SLACK_APPROVAL_CHANNEL", "#devops")
+
+    def _bot_token(self) -> str:
+        return os.getenv("SLACK_BOT_TOKEN", "")
 
     async def send_message(
         self,
@@ -33,7 +37,7 @@ class SlackNotifier:
         requires_approval: bool = False,
         approval_command: Optional[str] = None,
     ):
-        if not self.webhook_url:
+        if not self._webhook_url():
             log.warning("SLACK_WEBHOOK_URL not set — skipping notification")
             return
 
@@ -90,7 +94,7 @@ class SlackNotifier:
 
         async with httpx.AsyncClient(timeout=10) as client:
             try:
-                await client.post(self.webhook_url, json=payload)
+                await client.post(self._webhook_url(), json=payload)
             except Exception as e:
                 log.error("Slack notification failed", error=str(e))
 
