@@ -7,6 +7,8 @@ from typing import Optional
 
 import structlog
 
+from tools.ssh_utils import build_ssh_command
+
 log = structlog.get_logger()
 
 
@@ -33,7 +35,7 @@ class ServerCollector:
         for key, cmd in commands:
             try:
                 if host and host not in ("localhost", "127.0.0.1"):
-                    cmd = f"ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 {host} '{cmd}'"
+                    cmd = build_ssh_command(host, cmd)
                 proc = await asyncio.create_subprocess_shell(
                     cmd,
                     stdout=asyncio.subprocess.PIPE,

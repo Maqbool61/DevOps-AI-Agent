@@ -4,8 +4,6 @@ Receives events from GitHub, Alertmanager, and manual triggers.
 Durable queue + cloud storage for audit, logs, checkpoints, and org docs.
 """
 import asyncio
-import hashlib
-import hmac
 import os
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
@@ -19,6 +17,11 @@ from pydantic import BaseModel
 
 from agent.core import DevOpsAgent
 from agent.classifier import classify_issue
+from api.webhook_auth import (
+    get_webhook_secret,
+    verify_slack_signature,
+    verify_webhook_request,
+)
 from services.incident_queue import IncidentQueue
 from services.incident_store import IncidentStore
 from services.org_docs import OrgDocs
@@ -27,6 +30,7 @@ from services.org_config import OrgConfig
 from services.org_context import org_credentials, refresh_agent_credentials
 from services.pii_scrubber import scrub_dict, scrub_text
 from tools.notify import SlackNotifier
+from tools.safety import is_emergency_stop_active
 
 load_dotenv()
 
@@ -188,9 +192,12 @@ app = FastAPI(
 # ─── Helpers ──────────────────────────────────────────────────────────────────
 
 def verify_github_signature(payload: bytes, signature: str) -> bool:
-    secret = os.getenv("WEBHOOK_SECRET", "").encode()
-    expected = "sha256=" + hmac.new(secret, payload, hashlib.sha256).hexdigest()
-    return hmac.compare_digest(expected, signature)
+    return verify_webhook_request(payload, signature)
+
+
+def _require_webhook_auth(body: bytes, signature: Optional[str]) -> None:
+    if get_webhook_secret() and not verify_webhook_request(body, signature):
+        raise HTTPException(status_code=401, detail="Invalid signature")
 
 
 # ─── Routes ───────────────────────────────────────────────────────────────────
@@ -200,6 +207,7 @@ async def health():
     return {
         "status": "ok",
         "auto_apply": os.getenv("AUTO_APPLY", "false"),
+        "emergency_stop": is_emergency_stop_active(),
         "storage_provider": os.getenv("STORAGE_PROVIDER", "memory"),
         "org_id": os.getenv("ORG_ID", "default"),
         "queue_worker": _queue_running,
@@ -293,11 +301,9 @@ async def github_webhook(
 ):
     body = await request.body()
 
-    if os.getenv("WEBHOOK_SECRET"):
-        if not x_hub_signature_256 or not verify_github_signature(body, x_hub_signature_256):
-            raise HTTPException(status_code=401, detail="Invalid signature")
+    _require_webhook_auth(body, x_hub_signature_256)
 
-    payload = await request.json()
+    payload = __import__("json").loads(body)
 
     if x_github_event == "workflow_run":
         run = payload.get("workflow_run", {})
@@ -323,8 +329,13 @@ async def github_webhook(
 async def alertmanager_webhook(
     request: Request,
     x_org_id: str = Header(None, alias="X-Org-ID"),
+    x_hub_signature_256: str = Header(None),
+    x_webhook_signature: str = Header(None, alias="X-Webhook-Signature"),
 ):
-    payload = await request.json()
+    body = await request.body()
+    _require_webhook_auth(body, x_hub_signature_256 or x_webhook_signature)
+
+    payload = __import__("json").loads(body)
     queued = []
 
     for alert in payload.get("alerts", []):
@@ -360,8 +371,13 @@ async def alertmanager_webhook(
 async def manual_trigger(
     request: Request,
     x_org_id: str = Header(None, alias="X-Org-ID"),
+    x_hub_signature_256: str = Header(None),
+    x_webhook_signature: str = Header(None, alias="X-Webhook-Signature"),
 ):
-    context = await request.json()
+    body = await request.body()
+    _require_webhook_auth(body, x_hub_signature_256 or x_webhook_signature)
+
+    context = __import__("json").loads(body)
     if "type" not in context:
         raise HTTPException(status_code=400, detail="'type' field required")
 
@@ -373,9 +389,19 @@ async def manual_trigger(
 
 
 @app.post("/slack/action")
-async def slack_action(request: Request, background_tasks: BackgroundTasks):
-    form = await request.form()
-    payload = __import__("json").loads(form.get("payload", "{}"))
+async def slack_action(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    x_slack_signature: str = Header(None, alias="X-Slack-Signature"),
+    x_slack_request_timestamp: str = Header(None, alias="X-Slack-Request-Timestamp"),
+):
+    body = await request.body()
+    if not verify_slack_signature(body, x_slack_request_timestamp, x_slack_signature):
+        raise HTTPException(status_code=401, detail="Invalid Slack signature")
+
+    from urllib.parse import parse_qs
+    form = parse_qs(body.decode())
+    payload = __import__("json").loads(form.get("payload", ["{}"])[0])
 
     action = payload.get("actions", [{}])[0]
     action_id = action.get("action_id", "")

@@ -32,6 +32,7 @@ from collectors.gcp import GCPCollector
 from collectors.azure import AzureCollector
 from collectors.server import ServerCollector
 from tools.executor import SafeExecutor
+from tools.safety import check_emergency_stop_for_tool
 from tools.k8s_tools import K8sTools
 from tools.github_tools import GitHubTools
 from tools.cicd_tools import CICDTools
@@ -663,6 +664,11 @@ class DevOpsAgent:
         """Execute a command that was approved via Slack."""
         log.info("Executing approved action", incident_id=incident_id, command=command)
         result = await self.executor.run(command)
+        if result.get("emergency_stop"):
+            await self.notifier.send_message(
+                f"🛑 Emergency stop active — approved action blocked for `{incident_id}`:\n```{command}```"
+            )
+            return
         await self.notifier.send_message(
             f"✅ Approved action executed for `{incident_id}`:\n```{command}```\nResult: {result.get('stdout', '')}"
         )
@@ -769,6 +775,10 @@ class DevOpsAgent:
 
     async def _execute_tool(self, name: str, inputs: dict, context: dict) -> dict:
         """Route tool calls to the appropriate handler."""
+        blocked = check_emergency_stop_for_tool(name)
+        if blocked:
+            return blocked
+
         try:
             # ─── Existing K8s Tools ───────────────────────────────────────────
             if name == "get_k8s_context":
