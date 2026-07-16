@@ -294,7 +294,14 @@ async def github_webhook(
 async def alertmanager_webhook(
     request: Request,
     x_org_id: str = Header(None, alias="X-Org-ID"),
+    x_hub_signature_256: str = Header(None),
 ):
+    body = await request.body()
+
+    if os.getenv("WEBHOOK_SECRET"):
+        if not x_hub_signature_256 or not verify_github_signature(body, x_hub_signature_256):
+            raise HTTPException(status_code=401, detail="Invalid signature")
+
     payload = await request.json()
     queued = []
 
@@ -331,7 +338,14 @@ async def alertmanager_webhook(
 async def manual_trigger(
     request: Request,
     x_org_id: str = Header(None, alias="X-Org-ID"),
+    x_hub_signature_256: str = Header(None),
 ):
+    body = await request.body()
+
+    if os.getenv("WEBHOOK_SECRET"):
+        if not x_hub_signature_256 or not verify_github_signature(body, x_hub_signature_256):
+            raise HTTPException(status_code=401, detail="Invalid signature")
+
     context = await request.json()
     if "type" not in context:
         raise HTTPException(status_code=400, detail="'type' field required")
