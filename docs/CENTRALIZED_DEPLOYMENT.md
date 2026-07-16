@@ -62,8 +62,17 @@ Configure SSH for the agent user:
 Host ec2-app-*
     User ubuntu
     IdentityFile ~/.ssh/agent_key
-    StrictHostKeyChecking accept-new
+    UserKnownHostsFile ~/.ssh/known_hosts
+    StrictHostKeyChecking yes
 ```
+
+> **Security note:** The agent defaults to OpenSSH's strict host-key verification.
+> Remote collection will fail if the target host is not present in `known_hosts`.
+> Populate `known_hosts` before deploying:
+>
+> ```bash
+> ssh-keyscan -H <remote-host> >> ~/.ssh/known_hosts
+> ```
 
 ### 2. Trigger with `host` in webhook
 
@@ -164,6 +173,8 @@ GITHUB_TOKEN=...
 GITLAB_TOKEN=...
 
 # SSH: ensure agent OS user has keys in ~/.ssh/
+# SSH_KNOWN_HOSTS=/etc/devops-agent/known_hosts
+# SSH_REMOTE_USER=ubuntu
 ```
 
 ---
@@ -178,8 +189,10 @@ docker run -d \
   -p 8000:8000 \
   -v ~/.kube:/home/appuser/.kube:ro \
   -v ~/.ssh:/home/appuser/.ssh:ro \
+  -v /path/to/known_hosts:/etc/devops-agent/known_hosts:ro \
   -v agent-data:/data \
   --env-file .env \
+  -e SSH_KNOWN_HOSTS=/etc/devops-agent/known_hosts \
   devops-ai-agent:latest
 ```
 
@@ -195,6 +208,9 @@ volumes:
     secret:
       secretName: agent-ssh-keys
       defaultMode: 0600
+  - name: ssh-known-hosts
+    configMap:
+      name: agent-ssh-known-hosts
 ```
 
 ### HA: multiple replicas + shared storage

@@ -2,6 +2,7 @@
 Safe Command Executor
 Enforces command whitelists and human approval gates before running anything.
 """
+
 import asyncio
 import base64
 import os
@@ -10,6 +11,27 @@ from typing import Optional
 import structlog
 
 log = structlog.get_logger()
+
+
+def _build_ssh_args(host: str, command: str) -> list:
+    """Build SSH argv for remote command execution.
+
+    Defaults to OpenSSH's strict host-key checking (no StrictHostKeyChecking=no).
+    Use SSH_KNOWN_HOSTS to point to a known_hosts file, and SSH_REMOTE_USER
+    when the host is given without a user@ prefix.
+    """
+    ssh_args = ["ssh"]
+    known_hosts = os.getenv("SSH_KNOWN_HOSTS")
+    if known_hosts:
+        ssh_args.extend(["-o", f"UserKnownHostsFile={known_hosts}"])
+    remote_host = host
+    if "@" not in remote_host:
+        remote_user = os.getenv("SSH_REMOTE_USER")
+        if remote_user:
+            remote_host = f"{remote_user}@{remote_host}"
+    ssh_args.extend([remote_host, command])
+    return ssh_args
+
 
 # Commands that can always auto-run (read-only or safe restarts)
 ALWAYS_SAFE = [
@@ -124,7 +146,32 @@ class SafeExecutor:
         """Execute the command."""
         if host and host not in ("localhost", "127.0.0.1", ""):
             # SSH to remote host
-            command = f"ssh -o StrictHostKeyChecking=no {host} '{command}'"
+            ssh_args = _build_ssh_args(host, command)
+            display_command = " ".join(ssh_args)
+            log.info("Executing command", command=display_command)
+
+            try:
+                proc = await asyncio.create_subprocess_exec(
+                    *ssh_args,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                )
+                stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=60)
+                return {
+                    "success": proc.returncode == 0,
+                    "returncode": proc.returncode,
+                    "stdout": stdout.decode().strip()[-3000:],  # Truncate
+                    "stderr": stderr.decode().strip()[-1000:],
+                    "command": display_command,
+                }
+            except asyncio.TimeoutError:
+                return {
+                    "success": False,
+                    "error": "Command timed out after 60s",
+                    "command": display_command,
+                }
+            except Exception as e:
+                return {"success": False, "error": str(e), "command": display_command}
 
         log.info("Executing command", command=command)
 
@@ -143,6 +190,10 @@ class SafeExecutor:
                 "command": command,
             }
         except asyncio.TimeoutError:
-            return {"success": False, "error": "Command timed out after 60s", "command": command}
+            return {
+                "success": False,
+                "error": "Command timed out after 60s",
+                "command": command,
+            }
         except Exception as e:
             return {"success": False, "error": str(e), "command": command}
