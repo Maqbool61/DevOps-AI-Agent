@@ -3,6 +3,7 @@ SSH command helpers — strict host key checking by default.
 """
 import os
 import shlex
+from typing import List
 
 
 def _strict_host_key_checking() -> bool:
@@ -18,19 +19,27 @@ def format_ssh_target(host: str) -> str:
     return host
 
 
-def build_ssh_command(host: str, remote_command: str) -> str:
-    """Build an ssh invocation with safe defaults."""
+def build_ssh_argv(host: str, remote_command: str) -> List[str]:
+    """Build SSH argv for remote command execution (no shell on local side)."""
     target = format_ssh_target(host)
-    opts = ["-o", f"ConnectTimeout={os.getenv('SSH_CONNECT_TIMEOUT', '10')}"]
+    argv = [
+        "ssh",
+        "-o",
+        f"ConnectTimeout={os.getenv('SSH_CONNECT_TIMEOUT', '10')}",
+    ]
 
     if _strict_host_key_checking():
         known_hosts = os.getenv("SSH_KNOWN_HOSTS", "").strip()
         if known_hosts:
-            opts.extend(["-o", f"UserKnownHostsFile={known_hosts}"])
-        opts.extend(["-o", "StrictHostKeyChecking=yes"])
+            argv.extend(["-o", f"UserKnownHostsFile={known_hosts}"])
+        argv.extend(["-o", "StrictHostKeyChecking=yes"])
     else:
-        opts.extend(["-o", "StrictHostKeyChecking=no"])
+        argv.extend(["-o", "StrictHostKeyChecking=no"])
 
-    opt_str = " ".join(shlex.quote(o) for o in opts)
-    escaped_cmd = remote_command.replace("'", "'\"'\"'")
-    return f"ssh {opt_str} {shlex.quote(target)} '{escaped_cmd}'"
+    argv.extend([target, remote_command])
+    return argv
+
+
+def build_ssh_command(host: str, remote_command: str) -> str:
+    """Human-readable SSH command string (for logs and display)."""
+    return " ".join(shlex.quote(part) for part in build_ssh_argv(host, remote_command))

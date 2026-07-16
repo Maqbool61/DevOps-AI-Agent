@@ -2,36 +2,14 @@
 Server Context Collector
 Gathers system health metrics, service status, and logs.
 """
-
 import asyncio
-import os
 from typing import Optional
 
 import structlog
 
-from tools.ssh_utils import build_ssh_command
+from tools.ssh_utils import build_ssh_argv
 
 log = structlog.get_logger()
-
-
-def _build_ssh_args(host: str, command: str) -> list:
-    """Build SSH argv for remote command execution.
-
-    Defaults to OpenSSH's strict host-key checking (no StrictHostKeyChecking=no).
-    Use SSH_KNOWN_HOSTS to point to a known_hosts file, and SSH_REMOTE_USER
-    when the host is given without a user@ prefix.
-    """
-    ssh_args = ["ssh", "-o", "ConnectTimeout=10"]
-    known_hosts = os.getenv("SSH_KNOWN_HOSTS")
-    if known_hosts:
-        ssh_args.extend(["-o", f"UserKnownHostsFile={known_hosts}"])
-    remote_host = host
-    if "@" not in remote_host:
-        remote_user = os.getenv("SSH_REMOTE_USER")
-        if remote_user:
-            remote_host = f"{remote_user}@{remote_host}"
-    ssh_args.extend([remote_host, command])
-    return ssh_args
 
 
 class ServerCollector:
@@ -63,12 +41,17 @@ class ServerCollector:
         for key, cmd in commands:
             try:
                 if host and host not in ("localhost", "127.0.0.1"):
-                    cmd = build_ssh_command(host, cmd)
-                proc = await asyncio.create_subprocess_shell(
-                    cmd,
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE,
-                )
+                    proc = await asyncio.create_subprocess_exec(
+                        *build_ssh_argv(host, cmd),
+                        stdout=asyncio.subprocess.PIPE,
+                        stderr=asyncio.subprocess.PIPE,
+                    )
+                else:
+                    proc = await asyncio.create_subprocess_shell(
+                        cmd,
+                        stdout=asyncio.subprocess.PIPE,
+                        stderr=asyncio.subprocess.PIPE,
+                    )
                 stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=15)
                 result[key] = stdout.decode().strip() or stderr.decode().strip()
             except asyncio.TimeoutError:
