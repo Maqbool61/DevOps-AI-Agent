@@ -14,7 +14,8 @@ import sys
 def cmd_serve(args: argparse.Namespace) -> int:
     import uvicorn
 
-    host = args.host or os.getenv("HOST", "0.0.0.0")
+    # Local default binds loopback; set HOST=0.0.0.0 for Docker/K8s ingress.
+    host = args.host or os.getenv("HOST", "127.0.0.1")
     port = args.port or int(os.getenv("PORT", "8000"))
     workers = args.workers or int(os.getenv("UVICORN_WORKERS", "2"))
     reload = args.reload
@@ -54,7 +55,7 @@ def main() -> None:
     sub = parser.add_subparsers(dest="command", required=True)
 
     serve = sub.add_parser("serve", help="Start the webhook API server")
-    serve.add_argument("--host", default=None, help="Bind host (default: 0.0.0.0)")
+    serve.add_argument("--host", default=None, help="Bind host (default: 127.0.0.1, or HOST env)")
     serve.add_argument("--port", type=int, default=None, help="Bind port (default: 8000)")
     serve.add_argument("--workers", type=int, default=None, help="Uvicorn workers (default: 2)")
     serve.add_argument("--reload", action="store_true", help="Dev mode: auto-reload on code changes")

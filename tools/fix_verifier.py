@@ -183,8 +183,22 @@ class FixVerifier:
             # Check pod status
             if "pod_name" in expected_state and "namespace" in expected_state:
                 import subprocess
-                cmd = f"kubectl get pod {expected_state['pod_name']} -n {expected_state['namespace']} -o jsonpath='{{.status.phase}}'"
-                proc = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=10)
+                proc = subprocess.run(
+                    [
+                        "kubectl",
+                        "get",
+                        "pod",
+                        expected_state["pod_name"],
+                        "-n",
+                        expected_state["namespace"],
+                        "-o",
+                        "jsonpath={.status.phase}",
+                    ],
+                    capture_output=True,
+                    text=True,
+                    timeout=10,
+                    check=False,
+                )
                 
                 pod_status = proc.stdout.strip()
                 result["details"]["pod_status"] = pod_status
@@ -233,11 +247,21 @@ class FixVerifier:
                 import platform
                 
                 if platform.system().lower() == 'windows':
-                    cmd = f"sc query {expected_state['service_name']}"
+                    proc = subprocess.run(
+                        ["sc", "query", expected_state["service_name"]],
+                        capture_output=True,
+                        text=True,
+                        timeout=10,
+                        check=False,
+                    )
                 else:
-                    cmd = f"systemctl is-active {expected_state['service_name']}"
-                
-                proc = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=10)
+                    proc = subprocess.run(
+                        ["systemctl", "is-active", expected_state["service_name"]],
+                        capture_output=True,
+                        text=True,
+                        timeout=10,
+                        check=False,
+                    )
                 
                 if platform.system().lower() == 'windows':
                     service_running = "RUNNING" in proc.stdout
